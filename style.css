@@ -1,0 +1,700 @@
+/* =========================================================
+   Marginal — Essay Analyzer
+   Stylesheet (separated from HTML)
+   Breakpoints: mobile (<480px), large mobile/small tablet
+   (480–767px), tablet (768–1023px), laptop (1024–1439px),
+   desktop (1440px+)
+   ========================================================= */
+
+:root{
+  --paper:#FAF7F0;
+  --paper-card:#FFFFFF;
+  --ink:#2B2A28;
+  --ink-soft:#5C5952;
+  --rule:#E4DFD3;
+  --margin-line:#B5482F;
+  --margin-line-soft:#D98F79;
+  --good:#5C7A5C;
+  --good-bg:#EAF1EA;
+  --warn:#B5482F;
+  --warn-bg:#FBEEEA;
+
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:16px;
+  --space-4:24px;
+  --space-5:32px;
+  --space-6:48px;
+  --space-7:64px;
+
+  --radius:6px;
+  --shadow-soft:0 2px 12px rgba(43,42,40,0.06);
+  --shadow-med:0 8px 30px rgba(43,42,40,0.10);
+
+  /* Fluid type scale — overridden at breakpoints below */
+  --h1-size:44px;
+  --lede-size:17px;
+  --content-max:760px;
+  --workspace-max:760px;   /* becomes wider on laptop/desktop breakpoints */
+  --panel-height:520px;    /* fixed panel height on large screens, internal scroll */
+}
+
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;height:100%;}
+body{
+  margin:0;
+  min-height:100%;
+  color:var(--ink);
+  font-family:'Inter',sans-serif;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+
+  /* Warm base paper color, a soft vignette, and a tiled doodle pattern that
+     repeats across the ENTIRE page — not just a few fixed-position icons —
+     so there's no blank stretch anywhere regardless of page length. */
+  background-color:var(--paper);
+  background-image:
+    radial-gradient(circle at 12% -10%, rgba(181,72,47,0.06), transparent 40%),
+    radial-gradient(circle at 100% 0%, rgba(92,122,92,0.045), transparent 35%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='420' viewBox='0 0 420 420'%3E%3Cg fill='none' stroke='%23B5482F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' opacity='0.16'%3E%3Cg transform='translate(30,40) rotate(10)'%3E%3Cpath d='M0 30 L22 8 L30 16 L8 38 Z'/%3E%3Cpath d='M22 8 L30 16'/%3E%3C/g%3E%3Cg transform='translate(150,20) rotate(-8)'%3E%3Cpath d='M0 10 Q14 -4 28 8 T56 6'/%3E%3C/g%3E%3Cg transform='translate(260,50)'%3E%3Cellipse cx='20' cy='16' rx='19' ry='15'/%3E%3Ctext x='20' y='23' font-family='Georgia,serif' font-weight='700' font-size='17' text-anchor='middle' fill='%23B5482F' stroke='none'%3EA%3C/text%3E%3C/g%3E%3Cg transform='translate(60,140) rotate(-10)' stroke='%235C7A5C'%3E%3Cpath d='M6 20l7 8L28 6'/%3E%3C/g%3E%3Cg transform='translate(180,150)'%3E%3Cpath d='M20 4v10M20 26v10M4 20h10M26 20h10M9 9l7 7M31 9l-7 7'/%3E%3C/g%3E%3Cg transform='translate(300,160) rotate(6)'%3E%3Cpath d='M8 6v20a6 6 0 0 0 12 0v-17a4 4 0 0 0-8 0v15'/%3E%3C/g%3E%3Cg transform='translate(10,240)'%3E%3Cpath d='M18 4 C12 0,3 1,2 4 V26 C4 23,13 22,18 25 C23 22,32 23,34 26 V4 C32 1,23 0,18 4 Z'/%3E%3Cline x1='18' y1='4' x2='18' y2='25'/%3E%3C/g%3E%3Cg transform='translate(140,260) rotate(-4)' stroke='%235C7A5C'%3E%3Cpath d='M2 10 Q16 -2 30 8 T58 6'/%3E%3Cpath d='M50 0 L58 6 L48 12'/%3E%3C/g%3E%3Cg transform='translate(270,270)'%3E%3Cellipse cx='18' cy='14' rx='17' ry='13'/%3E%3Ctext x='18' y='20' font-family='Georgia,serif' font-weight='700' font-size='15' text-anchor='middle' fill='%23B5482F' stroke='none'%3EB+%3C/text%3E%3C/g%3E%3Cg transform='translate(60,340) rotate(8)'%3E%3Cpath d='M0 26 L20 6 L26 12 L6 32 Z'/%3E%3C/g%3E%3Cg transform='translate(230,350)' stroke='%235C7A5C'%3E%3Cpath d='M20 4v10M20 26v10M4 20h10M26 20h10'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  background-repeat:no-repeat, no-repeat, repeat;
+  background-position:0 0, 0 0, 0 0;
+  background-size:auto, auto, 420px 420px;
+}
+h1,h2,h3{
+  font-family:'Source Serif 4',serif;
+  font-weight:700;
+  line-height:1.15;
+  margin:0;
+  color:var(--ink);
+}
+p{margin:0;}
+::selection{background:var(--margin-line-soft);color:#fff;}
+
+a{color:inherit;}
+button{font-family:inherit;cursor:pointer;}
+button:focus-visible, textarea:focus-visible, input:focus-visible{
+  outline:2px solid var(--margin-line);
+  outline-offset:2px;
+}
+
+img{max-width:100%;display:block;}
+
+/* ---------- LAYOUT CONTAINER ---------- */
+.wrap{
+  max-width:var(--content-max);
+  margin:0 auto;
+  padding:0 var(--space-4);
+  width:100%;
+}
+/* Wider container just for the workspace page, so two panels have room */
+.wrap-wide{
+  max-width:var(--workspace-max, var(--content-max));
+}
+
+/* ---------- NAV ---------- */
+.nav{
+  padding:var(--space-4) 0;
+  border-bottom:1px solid var(--rule);
+}
+.nav .wrap{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--space-3);
+  flex-wrap:wrap;
+}
+.brand{
+  display:flex;
+  align-items:center;
+  gap:var(--space-2);
+  font-family:'Source Serif 4',serif;
+  font-weight:700;
+  font-size:19px;
+  letter-spacing:-0.01em;
+}
+.brand .mark{
+  width:11px;height:10px;
+  border-radius:60% 40% 55% 45% / 55% 45% 60% 40%; /* organic ink-splat, not a perfect circle */
+  background:var(--margin-line);
+  display:inline-block;
+  flex:none;
+  transform:rotate(-8deg);
+}
+.nav-tag{
+  font-size:13px;
+  color:var(--ink-soft);
+  letter-spacing:0.02em;
+}
+
+/* ---------- HERO ---------- */
+.hero{
+  position:relative;
+  padding:var(--space-6) 0 var(--space-5);
+}
+.hero-content{
+  position:relative;
+  z-index:1;
+}
+
+/* Decorative margin doodles — quiet by default, only shown where there's
+   real room for them (large screens; see breakpoint below) */
+.doodles{
+  display:none;
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  color:var(--margin-line-soft);
+}
+.doodle{
+  position:absolute;
+  overflow:visible;
+}
+.doodle-grade{
+  top:-6px;
+  right:26px;
+  width:84px;
+  height:84px;
+  opacity:0.6;
+  transform:rotate(-6deg);
+  color:var(--margin-line);
+}
+.doodle-arrow{
+  top:70px;
+  right:130px;
+  width:110px;
+  height:90px;
+  opacity:0.45;
+}
+.doodle-check{
+  top:6px;
+  right:190px;
+  width:26px;
+  height:26px;
+  opacity:0.5;
+  color:var(--good);
+  transform:rotate(-8deg);
+}
+.doodle-star{
+  bottom:22px;
+  right:56px;
+  width:22px;
+  height:22px;
+  opacity:0.35;
+}
+.doodle-underline{
+  top:118px;
+  right:24px;
+  width:110px;
+  height:14px;
+  opacity:0.4;
+}
+
+/* ---------- WORKSPACE (essay + results side by side) ---------- */
+.workspace{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:var(--space-5);
+  padding-bottom:var(--space-6);
+}
+.eyebrow{
+  font-size:13px;
+  font-weight:600;
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  color:var(--margin-line);
+  margin-bottom:var(--space-3);
+  display:flex;
+  align-items:center;
+  gap:var(--space-2);
+}
+.eyebrow::before{
+  content:"";
+  width:22px;height:1px;
+  background:var(--margin-line);
+  display:inline-block;
+  flex:none;
+}
+.hero h1{
+  font-size:var(--h1-size);
+  max-width:14ch;
+  margin-bottom:var(--space-4);
+}
+.hero p.lede{
+  font-size:var(--lede-size);
+  color:var(--ink-soft);
+  max-width:52ch;
+  margin-bottom:var(--space-5);
+}
+
+/* Hand-drawn underline accent, like a red pen mark under the key word */
+.mark-word{
+  position:relative;
+  font-style:italic;
+  display:inline-block;
+}
+.mark-word::after{
+  content:"";
+  position:absolute;
+  left:-2%;
+  right:-2%;
+  bottom:-0.08em;
+  height:0.22em;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 20' preserveAspectRatio='none'%3E%3Cpath d='M2 13 Q 40 3, 78 12 T 152 11 T 224 12 T 298 9' fill='none' stroke='%23B5482F' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-size:100% 100%;
+}
+
+/* ---------- MARGIN CARD (signature element) ---------- */
+.margin-card{
+  position:relative;
+  background:var(--paper-card);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-soft);
+  padding:var(--space-5) var(--space-5) var(--space-5) var(--space-6);
+  border:1px solid var(--rule);
+  overflow:hidden;
+}
+.margin-card::before{
+  content:"";
+  position:absolute;
+  left:36px;
+  top:0;
+  bottom:0;
+  width:2px;
+  background:var(--margin-line-soft);
+}
+.margin-card::after{
+  content:"";
+  position:absolute;
+  left:0; right:0; top:0; bottom:0;
+  background-image:repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 27px,
+    var(--rule) 28px
+  );
+  pointer-events:none;
+  opacity:0.6;
+}
+
+/* Folded paper corner — a small physical detail that sells the "paper" idea */
+.dogear{
+  position:absolute;
+  top:0;
+  right:0;
+  width:26px;
+  height:26px;
+  z-index:2;
+  background:linear-gradient(135deg, transparent 50%, var(--paper) 50%);
+  box-shadow:-2px 2px 4px rgba(43,42,40,0.12);
+  clip-path:polygon(100% 0, 0 0, 100% 100%);
+  pointer-events:none;
+}
+
+.field-label{
+  font-size:13px;
+  font-weight:600;
+  color:var(--ink-soft);
+  margin-bottom:var(--space-2);
+  display:block;
+  position:relative;
+  z-index:1;
+}
+
+textarea{
+  position:relative;
+  z-index:1;
+  width:100%;
+  min-height:220px;
+  resize:vertical;
+  border:none;
+  background:transparent;
+  font-family:'Source Serif 4',serif;
+  font-size:17px;
+  line-height:28px;
+  color:var(--ink);
+  padding:0;
+}
+textarea::placeholder{color:#B7B2A6;font-style:italic;}
+textarea:focus{outline:none;}
+
+.card-footer{
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--space-3);
+  flex-wrap:wrap;
+  margin-top:var(--space-4);
+  padding-top:var(--space-4);
+  border-top:1px solid var(--rule);
+}
+.word-count{
+  font-size:13px;
+  color:var(--ink-soft);
+}
+.word-count strong{color:var(--ink);font-weight:600;}
+
+.api-error{
+  position:relative;
+  z-index:1;
+  display:none;
+  font-size:13px;
+  color:var(--warn);
+  background:var(--warn-bg);
+  border-radius:var(--radius);
+  padding:var(--space-3);
+  margin-top:var(--space-3);
+}
+.api-error.show{display:block;}
+
+.btn-primary{
+  background:var(--ink);
+  color:#fff;
+  border:none;
+  padding:12px 24px;
+  border-radius:var(--radius);
+  font-size:15px;
+  font-weight:600;
+  box-shadow:0 3px 0 rgba(43,42,40,0.25);
+  transition:background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  min-height:44px; /* touch target */
+}
+.btn-primary:hover{background:#000;transform:translateY(-1px);box-shadow:0 4px 0 rgba(43,42,40,0.25);}
+.btn-primary:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(43,42,40,0.25);}
+.btn-primary:disabled{
+  background:#C9C4B8;
+  cursor:not-allowed;
+  box-shadow:none;
+  transform:none;
+}
+
+.btn-secondary{
+  background:transparent;
+  color:var(--ink);
+  border:1px solid var(--rule);
+  padding:11px 22px;
+  border-radius:var(--radius);
+  font-size:15px;
+  font-weight:600;
+  min-height:44px;
+  transition:border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.btn-secondary:hover{border-color:var(--margin-line);background:var(--warn-bg);transform:translateY(-1px);}
+
+/* ---------- RESULTS PANEL ---------- */
+/* Hidden by default (collapsed + faded). Revealed with .has-results
+   on the parent .workspace, once "Analyze essay" is clicked. */
+.panel-results{
+  background:var(--paper-card);
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-soft);
+  display:flex;
+  flex-direction:column;
+
+  padding:0;
+  max-height:0;
+  opacity:0;
+  transform:translateY(16px);
+  overflow:hidden;
+  transition:max-height 0.5s ease, opacity 0.4s ease, transform 0.45s ease, padding 0.4s ease;
+}
+.workspace.has-results .panel-results{
+  padding:var(--space-5);
+  max-height:3000px; /* comfortably larger than content, animates the reveal */
+  opacity:1;
+  transform:translateY(0);
+}
+
+.score-row{
+  display:flex;
+  align-items:center;
+  gap:var(--space-5);
+  padding:var(--space-5);
+  background:var(--paper-card);
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-soft);
+  margin-bottom:var(--space-4);
+  flex-wrap:wrap;
+}
+.score-circle{
+  position:relative;
+  flex:none;
+  width:88px;height:88px;
+  border-radius:50%;
+  border:3px double var(--good);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  font-family:'Source Serif 4',serif;
+  transform:rotate(-4deg);
+  box-shadow:0 3px 10px rgba(92,122,92,0.18);
+}
+.score-circle .num, .score-circle .out-of{transform:rotate(4deg);} /* counter-rotate text so it reads upright */
+.score-circle .num{font-size:28px;font-weight:700;line-height:1;color:var(--good);}
+.score-circle .out-of{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+.score-check{
+  position:absolute;
+  bottom:-6px;
+  right:-6px;
+  width:26px;
+  height:26px;
+  padding:4px;
+  background:var(--good);
+  color:#fff;
+  border-radius:50%;
+  border:2px solid var(--paper-card);
+  transform:rotate(4deg);
+}
+.score-meta{min-width:0;flex:1;}
+.score-meta h3{font-size:20px;margin-bottom:var(--space-1);}
+.score-meta p{font-size:14px;color:var(--ink-soft);}
+
+.annotations{
+  display:flex;
+  flex-direction:column;
+  gap:var(--space-3);
+}
+.annotation{
+  position:relative;
+  background:var(--paper-card);
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  padding:var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+  opacity:0;
+  transform:translateY(10px);
+  transition:opacity 0.4s ease, transform 0.4s ease, box-shadow 0.2s ease;
+}
+.workspace.has-results .annotation:hover{
+  box-shadow:var(--shadow-med);
+  transform:translateY(-2px);
+}
+.workspace.has-results .annotation{
+  opacity:1;
+  transform:translateY(0);
+}
+.workspace.has-results .annotation:nth-child(1){transition-delay:0.08s;}
+.workspace.has-results .annotation:nth-child(2){transition-delay:0.16s;}
+.workspace.has-results .annotation:nth-child(3){transition-delay:0.24s;}
+.annotation::before{
+  content:"";
+  position:absolute;
+  left:0; top:var(--space-3); bottom:var(--space-3);
+  width:3px;
+  border-radius:2px;
+  background:var(--margin-line-soft);
+}
+.annotation.good::before{background:var(--good);}
+.annotation-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--space-2);
+  flex-wrap:wrap;
+  margin-bottom:var(--space-2);
+}
+.annotation-head h4{
+  font-family:'Inter',sans-serif;
+  font-weight:600;
+  font-size:15px;
+  margin:0;
+}
+.pill{
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:0.03em;
+  text-transform:uppercase;
+  padding:3px 9px;
+  border-radius:100px;
+  white-space:nowrap;
+}
+.pill.good{background:var(--good-bg);color:var(--good);}
+.pill.warn{background:var(--warn-bg);color:var(--warn);}
+.annotation p{font-size:14px;color:var(--ink-soft);}
+
+.results-footer{
+  display:flex;
+  justify-content:center;
+  margin-top:var(--space-5);
+}
+
+footer{
+  margin-top:var(--space-7);
+  padding:var(--space-5) 0 var(--space-6);
+  border-top:1px solid var(--rule);
+  text-align:center;
+}
+footer p{font-size:13px;color:var(--ink-soft);}
+
+/* =========================================================
+   RESPONSIVE BREAKPOINTS
+   Mobile-first base styles above are tuned for ~360–479px.
+   Each breakpoint below scales layout up for larger screens.
+   ========================================================= */
+
+/* Small mobile (very narrow phones, <380px) */
+@media (max-width:379px){
+  :root{
+    --h1-size:26px;
+    --lede-size:15px;
+  }
+  .wrap{padding:0 var(--space-3);}
+  .margin-card{padding:var(--space-3) var(--space-3) var(--space-3) var(--space-4);}
+  .margin-card::before{left:20px;}
+  .btn-primary, .btn-secondary{width:100%;text-align:center;}
+  .card-footer{flex-direction:column;align-items:stretch;}
+  .score-row{flex-direction:column;align-items:flex-start;text-align:left;}
+}
+
+/* Mobile (380–479px) */
+@media (min-width:380px) and (max-width:479px){
+  :root{
+    --h1-size:30px;
+    --lede-size:15.5px;
+  }
+  .margin-card{padding:var(--space-4) var(--space-4) var(--space-4) var(--space-5);}
+  .margin-card::before{left:26px;}
+  .score-row{flex-direction:column;align-items:flex-start;}
+}
+
+/* Large mobile / small tablet (480–767px) */
+@media (min-width:480px) and (max-width:767px){
+  :root{
+    --h1-size:34px;
+    --lede-size:16px;
+  }
+  .margin-card::before{left:28px;}
+  .score-row{flex-wrap:nowrap;}
+}
+
+/* Tablet (768–1023px) */
+@media (min-width:768px) and (max-width:1023px){
+  :root{
+    --h1-size:40px;
+    --content-max:680px;
+  }
+}
+
+/* Laptop and up (1024px+): essay shows full width by default.
+   Clicking "Analyze" adds .has-results to .workspace, which shrinks
+   the essay panel and slides the results panel in from the right.
+   No page scroll needed — each panel scrolls internally instead. */
+@media (min-width:1024px){
+  :root{
+    --workspace-max:1080px;
+  }
+  .doodles{display:block;}
+
+  /* Body becomes a full-height column: nav and footer keep their natural
+     size, .page-main takes whatever space is left and stretches to fill
+     it exactly — no fixed pixel guess, so there's never leftover gap
+     regardless of how tall the browser window is. */
+  body{
+    display:flex;
+    flex-direction:column;
+    min-height:100vh;
+  }
+  .nav{flex:none;}
+  footer{flex:none;margin-top:0;}
+
+  .page-main{
+    flex:1 1 auto;
+    display:flex;
+    flex-direction:column;
+    min-height:0; /* required so children can shrink/scroll correctly inside a flex column */
+  }
+  .hero{flex:none;}
+
+  .workspace{
+    flex:1 1 auto;
+    min-height:380px; /* floor so it never gets crushed on a very short window */
+    padding-bottom:var(--space-5);
+    display:flex;
+    flex-direction:row;
+    align-items:stretch;
+    gap:0; /* no gap while results panel is collapsed, so essay truly spans full width */
+    transition:gap 0.5s ease;
+  }
+  .workspace.has-results{
+    gap:var(--space-5);
+  }
+
+  .panel-input{
+    flex:1 1 100%;
+    height:auto; /* fills the workspace's actual available height via stretch, not a guessed px value */
+    display:flex;
+    flex-direction:column;
+    transition:flex-basis 0.5s ease;
+  }
+  .panel-input textarea{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+  }
+
+  .panel-results{
+    flex:0 0 0%;
+    max-height:none;   /* mobile's max-height collapse isn't used here — flex-basis handles it */
+    transform:translateX(24px);
+    overflow:hidden;
+    transition:flex-basis 0.5s ease, opacity 0.4s ease 0.05s, transform 0.5s ease, padding 0.4s ease;
+  }
+
+  /* Once results appear, both panels keep stretching to match the
+     workspace's full height — same mechanism, so essay and results
+     are always equal length, never mismatched. */
+  .workspace.has-results .panel-input{
+    flex:1 1 58%;
+  }
+  .workspace.has-results .panel-results{
+    flex:1 1 40%;
+    transform:translateX(0);
+    overflow-y:auto; /* results can scroll internally if content exceeds the available height */
+  }
+}
+
+/* Laptop (1024–1439px) */
+@media (min-width:1024px) and (max-width:1439px){
+  :root{
+    --content-max:760px;
+  }
+}
+
+/* Large desktop (1440px+) */
+@media (min-width:1440px){
+  :root{
+    --h1-size:52px;
+    --lede-size:18px;
+    --content-max:860px;
+    --workspace-max:1240px;
+    --panel-height:620px;
+  }
+  body{font-size:16.5px;}
+}
+
+/* Landscape phones — keep hero compact so results aren't buried */
+@media (max-height:480px) and (orientation:landscape){
+  .hero{padding:var(--space-5) 0 var(--space-4);}
+}
+
+/* High-DPI screens — keep borders crisp */
+@media (-webkit-min-device-pixel-ratio:2), (min-resolution:192dpi){
+  .margin-card, .score-row, .annotation{border-width:1px;}
+}
+
+/* Print — useful if a report/demo screenshot gets printed */
+@media print{
+  .nav, footer, .btn-secondary{display:none;}
+  body{background:#fff;}
+  .margin-card::after{display:none;}
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important; scroll-behavior:auto !important;}
+}

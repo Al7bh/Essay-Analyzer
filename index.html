@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Essay Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="wrap">
+      <div class="brand"><span class="mark"></span>Marginal</div>
+      <div class="nav-tag">Essay feedback, instantly</div>
+    </div>
+  </nav>
+
+  <main class="wrap wrap-wide page-main">
+    <section class="hero">
+      <div class="hero-content">
+        <div class="eyebrow">Automated Essay Analysis</div>
+        <h1>See your essay the way a <span class="mark-word">grader</span> would.</h1>
+        <p class="lede">Paste a draft on the left. Your score and margin-style notes on structure, grammar, and vocabulary — the same things a teacher would circle in red — appear on the right.</p>
+      </div>
+    </section>
+
+    <div class="workspace" id="workspace">
+      <!-- LEFT: essay input -->
+      <div class="margin-card panel-input">
+        <span class="dogear" aria-hidden="true"></span>
+        <label class="field-label" for="essay-input">Your essay</label>
+        <textarea id="essay-input" placeholder="Start typing or paste your essay here…"></textarea>
+        <div class="card-footer">
+          <span class="word-count"><strong id="word-count">0</strong> words</span>
+          <button class="btn-primary" id="analyze-btn" disabled>Analyze essay</button>
+        </div>
+        <p class="api-error" id="api-error" role="alert"></p>
+      </div>
+
+      <!-- RIGHT: results (hidden until analyzed, animates in) -->
+      <div class="panel-results" id="results">
+        <div class="score-row">
+          <div class="score-circle" id="score-circle">
+            <span class="num" id="score-num">–</span>
+            <span class="out-of">out of 100</span>
+            <svg class="score-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13l4.5 5L20 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="score-meta">
+            <h3 id="score-summary">Analyzing…</h3>
+            <p id="score-stats"></p>
+          </div>
+        </div>
+
+        <div class="annotations" id="annotations">
+          <!-- Feedback cards are generated dynamically from the API response — see renderResults() below -->
+        </div>
+
+        <div class="results-footer">
+          <button class="btn-secondary" id="reset-btn">Analyze another essay</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>Built for academic feedback — not a substitute for instructor review.</p>
+  </footer>
+
+<script>
+  const API_URL = 'http://127.0.0.1:5000/analyze';
+
+  const textarea = document.getElementById('essay-input');
+  const wordCountEl = document.getElementById('word-count');
+  const analyzeBtn = document.getElementById('analyze-btn');
+  const workspace = document.getElementById('workspace');
+  const resetBtn = document.getElementById('reset-btn');
+  const apiError = document.getElementById('api-error');
+
+  const scoreNum = document.getElementById('score-num');
+  const scoreSummary = document.getElementById('score-summary');
+  const scoreStats = document.getElementById('score-stats');
+  const annotationsEl = document.getElementById('annotations');
+
+  function countWords(text){
+    const trimmed = text.trim();
+    if(!trimmed) return 0;
+    return trimmed.split(/\s+/).length;
+  }
+
+  textarea.addEventListener('input', () => {
+    const count = countWords(textarea.value);
+    wordCountEl.textContent = count;
+    analyzeBtn.disabled = count < 30; // require a minimal essay length
+  });
+
+  function renderResults(data){
+    scoreNum.textContent = data.score;
+    scoreSummary.textContent = data.summary;
+    scoreStats.textContent =
+      `${data.stats.word_count} words, ${data.stats.sentence_count} sentences analyzed.`;
+
+    // Build one annotation card per feedback category returned by the API
+    annotationsEl.innerHTML = '';
+    data.feedback.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'annotation' + (item.status === 'good' ? ' good' : '');
+      card.innerHTML = `
+        <div class="annotation-head">
+          <h4>${item.category}</h4>
+          <span class="pill ${item.status === 'good' ? 'good' : 'warn'}">${item.label}</span>
+        </div>
+        <p>${item.note}</p>
+      `;
+      annotationsEl.appendChild(card);
+    });
+  }
+
+  function showError(message){
+    apiError.textContent = message;
+    apiError.classList.add('show');
+  }
+
+  function clearError(){
+    apiError.textContent = '';
+    apiError.classList.remove('show');
+  }
+
+  analyzeBtn.addEventListener('click', async () => {
+    clearError();
+    analyzeBtn.disabled = true;
+    const originalLabel = analyzeBtn.textContent;
+    analyzeBtn.textContent = 'Analyzing…';
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ essay: textarea.value })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Analysis failed. Please try again.');
+      }
+
+      renderResults(data);
+      workspace.classList.add('has-results');
+
+    } catch (err) {
+      // Most common cause during development: the Flask server (app.py)
+      // isn't running, or is running on a different port.
+      const isNetworkError = err instanceof TypeError;
+      showError(
+        isNetworkError
+          ? 'Could not reach the analysis server. Make sure app.py is running (python app.py) at ' + API_URL
+          : err.message
+      );
+
+    } finally {
+      analyzeBtn.disabled = countWords(textarea.value) < 30;
+      analyzeBtn.textContent = originalLabel;
+    }
+  });
+
+  resetBtn.addEventListener('click', () => {
+  textarea.value = '';
+  wordCountEl.textContent = '0';
+  analyzeBtn.disabled = true;
+  workspace.classList.remove('has-results');
+  clearError();
+  
+  // FIX: Clear the old results so they don't stretch the flex container
+  annotationsEl.innerHTML = '';
+  scoreNum.textContent = '';
+  scoreSummary.textContent = 'Analyzing...';
+  scoreStats.textContent = '';
+
+  textarea.focus();
+});
+</script>
+</body>
+</html>
