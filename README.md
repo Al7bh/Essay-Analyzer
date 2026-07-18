@@ -1,8 +1,8 @@
-# Marginal — Backend (Phase 2)
+# Marginal — Backend
 
-Flask API that scores an essay and returns feedback, using a baseline
-Scikit-learn model (Ridge regression over hand-crafted text features).
-No AI/transformer model yet — that's the Phase 3 upgrade.
+Flask API that scores an essay and returns structured feedback, using
+either a baseline Scikit-learn model or a fine-tuned DistilBERT
+transformer (both are computed and returned together — see below).
 
 ## 1. Setup
 
@@ -10,144 +10,119 @@ No AI/transformer model yet — that's the Phase 3 upgrade.
 cd backend
 pip install -r requirements.txt --break-system-packages
 ```
+(Drop `--break-system-packages` if you're using a virtual environment.)
 
-(Drop `--break-system-packages` if you're using a virtual environment,
-which is generally the cleaner approach — see below.)
+**First run note:** `sentence-transformers` (used for the Coherence
+check) downloads a small pretrained model (~80MB) from Hugging Face
+the first time the server starts, and caches it locally after that —
+needs normal internet access on that first run.
 
-**Recommended: use a virtual environment** so this doesn't clash with
-other Python projects on your machine:
-```bash
-python3 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+## 2. The two models
 
-## 2. Train the model
+Both are already trained and included — nothing to do before running
+the app.
 
-The model is **already trained on real ASAP data** (1,783 real student
-essays from essay set 1) and included as `model.pkl` — you can skip
-straight to step 4 and it'll work immediately.
+- **Baseline** (`model.pkl`): Ridge regression over hand-crafted
+  features (length, spelling, structure, vocabulary). Trained on 1,783
+  real ASAP essays. Real held-out MAE: **6.49** (0–100 scale).
+- **Transformer** (`transformer_model/`): fine-tuned DistilBERT,
+  trained via the Colab notebook (`../colab/finetune_essay_scorer.ipynb`).
 
-To retrain it yourself:
-```bash
-python3 train.py sample_data/asap_set1_rescaled.csv
-```
-Real result: **Mean Absolute Error of 6.49 points** on a 0–100 scale,
-using a proper 80/20 train/test split. That's the honest baseline
-number to quote in your report — a simple Ridge regression using only
-hand-crafted features (length, spelling, structure, vocabulary), no
-deep learning.
+`/analyze` computes **both** scores every time and returns both
+(`baseline_score`, `transformer_score`) — the frontend shows the
+transformer's score as primary when it's available, with the baseline
+alongside it, and falls back to baseline-only if the transformer model
+folder is missing or its weight files weren't copied in (e.g. left out
+of a git upload to keep the repo size down — this is handled gracefully,
+not a crash, with a warning logged server-side).
 
-`sample_data/sample_essays.csv` (12 tiny hand-written essays) is still
-included too, purely as a fast smoke-test for the pipeline.
+To retrain the baseline: `python3 train.py sample_data/asap_set1_rescaled.csv`
+To retrain the transformer: see `../colab/finetune_essay_scorer.ipynb`
+and `../colab/TRANSFORMER_INTEGRATION.md`.
 
-## 3. Getting more of the ASAP dataset
-
-**Kaggle's competition page requires "joining" the competition to
-download** — and since it's long closed, Kaggle sometimes blocks new
-joins with a "late submission" message, which stops the download too.
-
-**Working alternative — no login needed:**
-```
-https://raw.githubusercontent.com/hanshaoling/AES_app/main/training_set_rel3.xls
-```
-This is the *exact* original dataset (verified: 12,978 essays, 28
-columns, matches the official per-set counts exactly), just mirrored
-on GitHub by another student project. Download it directly — no
-account, no competition join.
-
-Once downloaded, convert it to what `train.py` expects (this is
-exactly what produced `asap_set1_rescaled.csv`):
-```python
-import pandas as pd
-
-df = pd.read_excel("training_set_rel3.xls")
-df = df[df["essay_set"] == 1][["essay_id", "essay", "domain1_score"]].dropna()
-df = df.rename(columns={"domain1_score": "score"})
-
-min_s, max_s = df["score"].min(), df["score"].max()
-df["score"] = ((df["score"] - min_s) / (max_s - min_s)) * 100
-
-df[["essay", "score"]].to_csv("asap_set1_rescaled.csv", index=False)
-```
-
-To use a different essay set, or combine several, change the
-`essay_set == 1` filter — just remember each set has its own score
-range, so rescale each set separately *before* combining them, or the
-model will learn nonsense (a "9" means something different in set 1
-vs. set 7).
-
-**Note:** `xls` reading needs the `xlrd` package —
-`pip install xlrd --break-system-packages` if you don't already have it.
-
-
-## 4. Run the API
+## 3. Run the API
 
 ```bash
 python3 app.py
 ```
+Runs at `http://127.0.0.1:5000`. On first run this also creates
+`history.db` (SQLite) automatically if it doesn't exist yet.
 
-Server runs at `http://127.0.0.1:5000`. Test it:
-```bash
-curl -X POST http://127.0.0.1:5000/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"essay": "your essay text here, at least 30 words..."}'
+## 4. Endpoints
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/analyze` | POST | Main endpoint. Takes `{"essay": "...", "prompt": "...", "enabled_categories": [...]}` (only `essay` is required). Returns score, both model scores, and feedback cards. |
+| `/extract-text` | POST | Upload a `.pdf`/`.docx`/`.txt` file (`multipart/form-data`, field `file`), get back extracted plain text. Handles corrupted files, password-protected PDFs, and embedded images gracefully — never crashes, always returns a clear error message on bad input. |
+| `/history` | GET | Returns the 10 most recent saved analyses from the database. |
+| `/history` | POST | Saves a completed analysis (called by the frontend right after a successful `/analyze` — reuses that response, no recomputation). |
+| `/history/<id>` | DELETE | Deletes one saved entry. |
+| `/history` | DELETE | Clears all history. |
+| `/health` | GET | Simple liveness check. |
+
+### `/analyze` request body
+```json
+{
+  "essay": "required, at least 30 words",
+  "prompt": "optional -- enables the Relevance feedback category if provided",
+  "enabled_categories": ["Grammar", "Structure", "Vocabulary", "Coherence", "Relevance"]
+}
 ```
+`enabled_categories` is optional and defaults to all five — this is
+the "customizable evaluation criteria" feature: it only filters which
+feedback cards come back, it does **not** change the score itself
+(the score always comes from the ML model regardless of which
+categories are enabled).
 
-## 5. Connect the frontend
-
-In `index.html`, replace the mock click handler with a real fetch call:
-
-```javascript
-analyzeBtn.addEventListener('click', async () => {
-  analyzeBtn.disabled = true;
-  analyzeBtn.textContent = 'Analyzing…';
-  try {
-    const response = await fetch('http://127.0.0.1:5000/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ essay: textarea.value })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Analysis failed');
-
-    // Update the DOM with real results instead of the hardcoded mock values
-    document.getElementById('score-num').textContent = data.score;
-    // ...update feedback cards from data.feedback here...
-
-    workspace.classList.add('has-results');
-  } catch (err) {
-    alert('Something went wrong: ' + err.message);
-  } finally {
-    analyzeBtn.disabled = false;
-    analyzeBtn.textContent = 'Analyze essay';
+### `/analyze` response shape
+```json
+{
+  "score": 78,
+  "baseline_score": 72,
+  "transformer_score": 78,
+  "summary": "Solid draft, a few things to tighten",
+  "feedback": [
+    {"category": "Grammar", "status": "good|warn", "label": "...", "note": "..."},
+    ...
+  ],
+  "stats": {"word_count": 217, "sentence_count": 10},
+  "issues": {
+    "spelling": [{"word": "adress", "suggestions": ["dress", "address"]}],
+    "weak_words": [{"word": "good", "suggestions": ["beneficial", "effective", "valuable"]}]
   }
-});
+}
 ```
+`issues` feeds the click-to-fix editor in the frontend (clicking a
+flagged word in the essay shows real suggestion chips, sourced from
+this same data). Note `suggestions` is a **list** for both spelling and
+vocabulary now — spelling used to return a single forced "best guess"
+(`.correction()`), which was sometimes wrong (e.g. "adress" → "dress"
+outranked the correct "address" on raw word frequency); offering
+multiple ranked candidates fixed this.
 
-The full dynamic version (building the feedback cards from `data.feedback`
-instead of hardcoded HTML) is the next step — happy to build that
-once you're ready to connect frontend and backend for real.
-
-## File overview
+## 5. File overview
 
 | File | Purpose |
 |---|---|
-| `features.py` | Turns essay text into numeric features (word count, sentence structure, vocabulary richness, spelling). Used by both training and the live API — keep them in sync. |
-| `train.py` | Trains the Ridge regression model on a CSV of essays+scores, saves `model.pkl`. |
-| `app.py` | Flask API. `POST /analyze` takes `{"essay": "..."}`, returns score + feedback. |
-| `sample_data/sample_essays.csv` | 12 example essays for testing the pipeline before the real dataset is in. |
-| `requirements.txt` | Exact package versions used — all free, all pip-installable, no paid services. |
+| `app.py` | Flask API — all routes, feedback-card assembly. |
+| `features.py` | Essay text → numeric features (length, spelling, vocabulary, structure). Includes a whitelist + heuristics to reduce spellcheck false positives on brand names/proper nouns/contractions. |
+| `relevance.py` | Checks essay-vs-prompt topical overlap (TF-IDF + keyword coverage). Optional — only runs if a prompt is provided. |
+| `coherence.py` | Checks whether the essay stays on-topic sentence-to-sentence, using semantic sentence embeddings (SBERT). **Read this file's docstring** — it documents two earlier approaches (TF-IDF based) that were tried and failed real testing before this one. |
+| `db.py` | SQLite storage for essay history (`history.db`, auto-created). |
+| `file_parser.py` | Extracts text from uploaded `.pdf`/`.docx`/`.txt`, with real crash-prevention (tested against corrupted files, embedded images, password-protected PDFs). |
+| `train.py` | Trains the baseline Ridge regression model, saves `model.pkl`. |
+| `evaluate_models.py` | Compares baseline vs. transformer on the same held-out essays — generates `evaluation_report/` (CSV + charts + a markdown report) for your FYP write-up. |
+| `test_coherence_sbert.py` | Standalone script used to validate the SBERT coherence approach before it was built into `coherence.py` — kept as a record of that experiment. |
+| `sample_data/` | `sample_essays.csv` (12 tiny test essays) and `asap_set1_rescaled.csv` (1,783 real ASAP essays, rescaled to 0–100). |
+| `history.db` | SQLite database, auto-created on first run. Not included in the repo (it's your local data) — add it to `.gitignore` if it isn't already. |
 
-## Notes on the model itself
+## 6. What's genuinely ML vs. rule-based — be precise about this in your defense
 
-This is deliberately the **simple baseline**, not the transformer. It
-scores essays using surface-level features (length, spelling,
-sentence/paragraph structure, vocabulary variety) rather than deep
-language understanding. That's expected and fine for Phase 2 — it
-proves the full pipeline (extract → train → predict → serve → display)
-works, which is the harder engineering problem. The transformer
-upgrade in Phase 3 swaps out `model.pkl`'s prediction step for a
-fine-tuned DistilBERT call, without needing to change the API contract
-(`/analyze` still takes essay text, still returns score + feedback) —
-so the frontend won't need to change at all.
+- **The score** is ML: baseline Ridge regression, or fine-tuned DistilBERT.
+- **The feedback** (Grammar, Structure, Vocabulary, Coherence, Relevance)
+  is **not** ML — it's rule-based/dictionary-driven (spellchecker,
+  weak-word lists, TF-IDF, sentence embeddings compared by cosine
+  similarity). This is a deliberate, defensible design choice — rule-based
+  feedback is transparent, fast, and doesn't hallucinate, unlike asking
+  a model to generate free-text feedback. Say this plainly if asked;
+  don't let the polished UI imply more ML than is actually there.

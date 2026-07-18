@@ -130,20 +130,81 @@ def build_feedback(feat: dict) -> list:
         })
 
         
-    # --- Structure & Content Additions ---
-    if feat["sentence_count"] >= 5 and feat["paragraph_count"] >= 2:
+    # --- Length -- separate from Structure on purpose. word_count is BY
+    # FAR the single most influential feature in the actual scoring model
+    # (Ridge coefficient +10.07 -- roughly 4-5x larger than every other
+    # feature), yet nothing in the other feedback categories says
+    # anything about it. That's a real gap: an essay can have clean
+    # grammar, good structure, varied vocabulary, and solid coherence,
+    # and still score moderately just because it's short -- which looks
+    # like a contradiction unless length is called out explicitly.
+    # Thresholds below are from the REAL training data, not guessed:
+    # high-scoring essays (80+) had a median of 475 words; low-scoring
+    # essays (<50) had a median of just 171 words.
+    wc = feat["word_count"]
+    if wc >= 400:
+        feedback.append({
+            "category": "Length",
+            "status": "good",
+            "label": "Well-developed",
+            "note": f"At {wc} words, this essay is in the range associated with higher-scoring essays in the training data (which averaged around 475 words).",
+        })
+    elif wc >= 250:
+        feedback.append({
+            "category": "Length",
+            "status": "good",
+            "label": "Reasonable",
+            "note": f"At {wc} words, this essay is a reasonable length. Higher-scoring essays in the training data averaged closer to 475 words -- a bit more elaboration could help.",
+        })
+    else:
+        feedback.append({
+            "category": "Length",
+            "status": "warn",
+            "label": "Short",
+            "note": (
+                f"At {wc} words, this essay is notably shorter than what tends to score well: "
+                f"in the training data, essays scoring 80+ averaged around 475 words, while essays "
+                f"scoring below 50 averaged around 171 words. This matters more to the score than any "
+                f"single grammar or vocabulary issue. Consider adding another paragraph with a "
+                f"specific example or counterargument, rather than only polishing what's already here."
+            ),
+        })
+
+    # --- Structure -- based on ACTUAL sentence/paragraph counts, not a
+    # fixed pair of strings. Previously this only had two possible notes
+    # total, regardless of the essay, which is why most single-paragraph
+    # essays always showed the identical "What to add" text -- same bug
+    # class as the Vocabulary fix earlier, just not yet applied here.
+    sc = feat["sentence_count"]
+    pc = feat["paragraph_count"]
+
+    if pc >= 3 and sc >= 8:
         feedback.append({
             "category": "Structure",
             "status": "good",
             "label": "Strong",
-            "note": "Multiple paragraphs and sentences suggest a developed structure.",
+            "note": f"This essay has {sc} sentences across {pc} paragraphs, suggesting a well-developed structure with room to explore multiple ideas.",
+        })
+    elif pc >= 2 and sc >= 5:
+        feedback.append({
+            "category": "Structure",
+            "status": "good",
+            "label": "Developing",
+            "note": f"This essay has {sc} sentences across {pc} paragraphs -- a reasonable structure. Adding one more paragraph could let you develop your points further.",
+        })
+    elif pc == 1 and sc >= 5:
+        feedback.append({
+            "category": "Structure",
+            "status": "warn",
+            "label": "Single paragraph",
+            "note": f"<strong>What to add:</strong> This essay's {sc} sentences are all in a single paragraph. Consider breaking it into 2-3 paragraphs, each with a clear topic sentence and a specific supporting example.",
         })
     else:
         feedback.append({
             "category": "Structure",
             "status": "warn",
-            "label": "Underdeveloped",
-            "note": "<strong>What to add:</strong> Consider breaking your ideas into 2-3 distinct paragraphs. Add a clear topic sentence to start each new idea, and support it with a specific example.",
+            "label": "Minimal",
+            "note": f"<strong>What to add:</strong> This essay only has {sc} sentence{'s' if sc != 1 else ''} across {pc} paragraph{'s' if pc != 1 else ''} -- too short to show much structure yet. Aim for at least 2-3 paragraphs with several sentences each.",
         })
 
     # --- Vocabulary with specific, per-word replacements (not a fixed generic list) ---
@@ -294,7 +355,7 @@ def analyze():
     # model, not from which feedback cards are displayed -- this only
     # customizes which feedback the user is shown, matching what the
     # synopsis calls "customizable evaluation criteria."
-    ALL_CATEGORIES = ["Grammar", "Structure", "Vocabulary", "Coherence", "Relevance"]
+    ALL_CATEGORIES = ["Grammar", "Structure", "Length", "Vocabulary", "Coherence", "Relevance"]
     enabled_categories = data.get("enabled_categories", ALL_CATEGORIES)
 
     if not essay or len(essay.strip().split()) < 30:

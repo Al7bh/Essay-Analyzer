@@ -119,6 +119,26 @@ def _words_with_sentence_position(text: str):
     return result
 
 
+def _count_paragraphs(text: str) -> int:
+    """
+    Counts paragraphs by splitting on ANY real newline (one or more),
+    not just a blank-line double-newline ("\\n\\n").
+
+    Why: in an HTML <textarea>, line-WRAPPING due to width is purely
+    visual -- no actual newline character gets inserted into .value.
+    The only real "\\n" characters that ever appear are from the user
+    actually pressing Enter. So requiring TWO consecutive newlines
+    (a truly blank line) was too strict -- a single Enter between
+    paragraphs (very common; that's just "pressing Enter once", not
+    "pressing Enter twice") was being counted as still one paragraph,
+    which is wrong. This was a real, confirmed bug: a 3-paragraph essay
+    with a single Enter between each paragraph was reported as 1
+    paragraph, flagging "Single paragraph" when it clearly wasn't.
+    """
+    parts = re.split(r"\n+", text)
+    return max(len([p for p in parts if p.strip()]), 1)
+
+
 def extract_features(text: str) -> dict:
     """
     Returns a dict of numeric features for one essay, plus specific suggestions.
@@ -181,7 +201,7 @@ def extract_features(text: str) -> dict:
     return {
         "word_count": word_count,
         "sentence_count": sentence_count,
-        "paragraph_count": max(len([p for p in text.split("\n\n") if p.strip()]), 1),
+        "paragraph_count": _count_paragraphs(text),
         "avg_sentence_length": avg_sentence_length,
         "avg_word_length": avg_word_length,
         "vocab_richness": vocab_richness,

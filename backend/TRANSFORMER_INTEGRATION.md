@@ -1,6 +1,14 @@
 # Wiring the fine-tuned transformer into `app.py`
 
-Once you've run the notebook and downloaded `essay_scorer_distilbert.zip`:
+**This describes what's already implemented in `app.py`** — this
+document originally described the planned integration before it was
+built; the code now matches what's below, kept here as the reference
+explanation for your report.
+
+## Setup
+
+Once you've run the notebook (`finetune_essay_scorer.ipynb`) and
+downloaded `essay_scorer_distilbert.zip`:
 
 1. Unzip it into `backend/transformer_model/`, so you have:
    ```
@@ -9,92 +17,82 @@ Once you've run the notebook and downloaded `essay_scorer_distilbert.zip`:
      model.safetensors  (or pytorch_model.bin)
      tokenizer.json
      tokenizer_config.json
-     vocab.txt
      ...
    ```
+2. `pip install transformers torch --break-system-packages` (already in
+   `requirements.txt`).
 
-2. Install the extra dependency:
-   ```bash
-   pip install transformers torch --break-system-packages
-   ```
+## How `app.py` actually uses this
 
-3. In `app.py`, add a second prediction path that uses the transformer
-   instead of the Scikit-learn model. **Keep the baseline as a fallback**
-   — if the transformer model folder isn't there (e.g. you're demoing on
-   a machine where you didn't copy it over), the app should still work:
+Unlike the original plan (transformer OR baseline, whichever's
+available), **the current code always computes both scores and returns
+both** — the frontend shows the transformer's score as primary when
+available, with the baseline shown alongside for comparison, per your
+"show both scores" request.
 
-   ```python
-   import os
-   import torch
-   from transformers import AutoTokenizer, AutoModelForSequenceClassification
+```python
+TRANSFORMER_DIR = os.path.join(SCRIPT_DIR, "transformer_model")
+_transformer_bundle = None
 
-   TRANSFORMER_DIR = os.path.join(SCRIPT_DIR, "transformer_model")
-   _transformer_bundle = None
+def get_transformer_bundle():
+    global _transformer_bundle
+    if _transformer_bundle is None and os.path.isdir(TRANSFORMER_DIR):
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(TRANSFORMER_DIR)
+            model = AutoModelForSequenceClassification.from_pretrained(TRANSFORMER_DIR)
+            model.eval()
+            _transformer_bundle = {"tokenizer": tokenizer, "model": model}
+        except OSError:
+            # Folder exists but weight files are missing (e.g. left out of
+            # a git upload to keep the repo small) -- fall back to
+            # baseline-only instead of crashing every /analyze request.
+            # This exact bug existed and crashed the app before it was
+            # caught and fixed -- see conversation history.
+            app.logger.warning(f"{TRANSFORMER_DIR} exists but weights couldn't be loaded -- falling back to baseline.")
+            _transformer_bundle = False  # sentinel: "checked, not usable" -- avoids retrying every request
+    return _transformer_bundle or None
 
-   def get_transformer_bundle():
-       global _transformer_bundle
-       if _transformer_bundle is None and os.path.isdir(TRANSFORMER_DIR):
-           tokenizer = AutoTokenizer.from_pretrained(TRANSFORMER_DIR)
-           model = AutoModelForSequenceClassification.from_pretrained(TRANSFORMER_DIR)
-           model.eval()
-           _transformer_bundle = {"tokenizer": tokenizer, "model": model}
-       return _transformer_bundle
 
-   def predict_with_transformer(essay: str) -> float:
-       bundle = get_transformer_bundle()
-       inputs = bundle["tokenizer"](
-           essay, truncation=True, padding="max_length",
-           max_length=512, return_tensors="pt"
-       )
-       with torch.no_grad():
-           output = bundle["model"](**inputs)
-       raw = output.logits.item()
-       return max(0, min(100, round(raw * 100)))
-   ```
+def predict_with_transformer(essay: str) -> float:
+    bundle = get_transformer_bundle()
+    inputs = bundle["tokenizer"](essay, truncation=True, padding="max_length", max_length=512, return_tensors="pt")
+    with torch.no_grad():
+        output = bundle["model"](**inputs)
+    raw = output.logits.item()
+    return max(0, min(100, round(raw * 100)))
+```
 
-4. In the `/analyze` route, try the transformer first and fall back to
-   the baseline if it's not available:
+In `/analyze`:
 
-   ```python
-   @app.route("/analyze", methods=["POST"])
-   def analyze():
-       data = request.get_json(silent=True) or {}
-       essay = data.get("essay", "")
+```python
+bundle = get_model_bundle()
+vector = [features_to_vector(feat)]
+vector_scaled = bundle["scaler"].transform(vector)
+baseline_score = max(0, min(100, round(bundle["model"].predict(vector_scaled)[0])))
 
-       if not essay or len(essay.strip().split()) < 30:
-           return jsonify({"error": "Essay must be at least 30 words."}), 400
+transformer_score = None
+if get_transformer_bundle() is not None:
+    transformer_score = predict_with_transformer(essay)
 
-       feat = extract_features(essay)  # still used for the feedback cards either way
+score = transformer_score if transformer_score is not None else baseline_score
+```
 
-       if get_transformer_bundle() is not None:
-           score = predict_with_transformer(essay)
-       else:
-           bundle = get_model_bundle()
-           vector = [features_to_vector(feat)]
-           vector_scaled = bundle["scaler"].transform(vector)
-           score = max(0, min(100, round(bundle["model"].predict(vector_scaled)[0])))
+Both scores are returned in the response (`baseline_score`,
+`transformer_score`), alongside the single `score` field used as the
+"headline" number.
 
-       return jsonify({
-           "score": score,
-           "summary": score_to_band(score),
-           "feedback": build_feedback(feat),
-           "stats": {
-               "word_count": feat["word_count"],
-               "sentence_count": feat["sentence_count"],
-           },
-       })
-   ```
+`build_feedback()` — Grammar/Structure/Vocabulary — and the separate
+Coherence/Relevance checks all run on `feat`/the raw essay text
+directly, independent of which scoring model is used. **Only the score
+itself comes from the transformer**; the feedback categories are the
+same rule-based logic either way. See the main `README.md`'s section
+on what's genuinely ML vs. rule-based for why this matters in your defense.
 
-   Notice `build_feedback()` still uses the same feature-based logic as
-   before (grammar/structure/vocabulary cards) — only the *score itself*
-   comes from the transformer. You don't need the transformer to also
-   generate feedback text; the existing heuristics are still useful for
-   that, and rewriting them would be extra work for no real benefit.
+## Why keep both models, and show both scores
 
-## Why keep both models in the repo
-
-For your FYP report/defense, this is actually a good story: "we built
-and validated an end-to-end baseline first, then improved the scoring
-engine with a fine-tuned transformer, while keeping the baseline as a
-fallback." That's a legitimate, defensible engineering decision, not
-a compromise — mention it explicitly if asked why both exist.
+This is a legitimate, defensible engineering decision worth stating
+explicitly if asked: "we built and validated an end-to-end baseline
+first, measured it honestly (MAE 6.49), then improved the scoring
+engine with a fine-tuned transformer — and we show both scores so the
+comparison is visible, not just claimed." That's a stronger, more
+honest story than only ever showing one number and asserting it's better.
