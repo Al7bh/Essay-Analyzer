@@ -303,6 +303,80 @@ img{max-width:100%;display:block;}
   z-index:1;
 }
 
+/* ---------- ESSAY TOOLBAR (prompt field + upload) — sits ABOVE the
+   workspace, outside the essay card entirely, so it never competes with
+   the essay card's own fixed-height budget. ---------- */
+.essay-toolbar{
+  margin-bottom:var(--space-4);
+}
+.toolbar-row{
+  display:flex;
+  align-items:flex-end;
+  gap:var(--space-4);
+  flex-wrap:wrap;
+}
+.prompt-field{
+  flex:1;
+  min-width:240px;
+}
+.prompt-field .field-label{margin-bottom:var(--space-2);}
+
+.upload-btn{
+  flex:none;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  font-weight:600;
+  color:var(--margin-line);
+  background:var(--warn-bg);
+  border:1px solid transparent;
+  border-radius:100px;
+  padding:11px 16px;
+  white-space:nowrap;
+  cursor:pointer;
+  transition:background 0.15s ease, border-color 0.15s ease;
+}
+.upload-btn:hover{border-color:var(--margin-line-soft);}
+.upload-btn svg{width:13px;height:13px;flex:none;}
+
+.upload-notice{
+  display:none;
+  font-size:12.5px;
+  color:var(--good);
+  background:var(--good-bg);
+  border-radius:var(--radius);
+  padding:var(--space-2) var(--space-3);
+  margin-top:var(--space-3);
+  line-height:1.5;
+}
+/* Used for "N image(s)/table(s) were skipped" -- this is expected, normal
+   behavior, not a problem, so it gets a calm neutral tone rather than the
+   alarming red used for actual errors (which go through #api-error instead). */
+.upload-notice.info{color:var(--ink-soft);background:var(--rule);}
+.upload-notice.show{display:block;}
+
+.optional-tag{
+  font-weight:400;
+  color:#B7B2A6;
+  text-transform:none;
+  letter-spacing:0;
+}
+.prompt-input{
+  width:100%;
+  font-family:'Inter',sans-serif;
+  font-size:14px;
+  color:var(--ink);
+  background:var(--paper-card);
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  padding:10px 12px;
+  transition:border-color 0.15s ease;
+
+}
+.prompt-input::placeholder{color:#B7B2A6;}
+.prompt-input:focus{outline:none;border-color:var(--margin-line-soft);}
+
 textarea{
   position:relative;
   z-index:1;
@@ -427,7 +501,7 @@ textarea:focus{outline:none;}
   flex:none;
   width:88px;height:88px;
   border-radius:50%;
-  border:3px double var(--good);
+  border:3px double var(--good); /* default/fallback — overridden by band-* classes below */
   display:flex;
   align-items:center;
   justify-content:center;
@@ -435,9 +509,10 @@ textarea:focus{outline:none;}
   font-family:'Source Serif 4',serif;
   transform:rotate(-4deg);
   box-shadow:0 3px 10px rgba(92,122,92,0.18);
+  transition:border-color 0.3s ease, box-shadow 0.3s ease;
 }
 .score-circle .num, .score-circle .out-of{transform:rotate(4deg);} /* counter-rotate text so it reads upright */
-.score-circle .num{font-size:28px;font-weight:700;line-height:1;color:var(--good);}
+.score-circle .num{font-size:28px;font-weight:700;line-height:1;color:var(--good);transition:color 0.3s ease;}
 .score-circle .out-of{font-size:11px;color:var(--ink-soft);margin-top:2px;}
 .score-check{
   position:absolute;
@@ -451,7 +526,28 @@ textarea:focus{outline:none;}
   border-radius:50%;
   border:2px solid var(--paper-card);
   transform:rotate(4deg);
+  transition:background 0.3s ease;
 }
+
+/* Score bands — four tiers matching the backend's score_to_band() thresholds:
+   <50 needs work, 50-69 developing, 70-84 solid, 85+ excellent.
+   Applied via JS (renderResults) as a class on #score-circle / #score-check. */
+.score-circle.band-low{border-color:var(--warn);box-shadow:0 3px 10px rgba(181,72,47,0.18);}
+.score-circle.band-low .num{color:var(--warn);}
+.score-check.band-low{background:var(--warn);}
+
+.score-circle.band-mid{border-color:#B8862E;box-shadow:0 3px 10px rgba(184,134,46,0.18);}
+.score-circle.band-mid .num{color:#B8862E;}
+.score-check.band-mid{background:#B8862E;}
+
+.score-circle.band-good{border-color:var(--good);box-shadow:0 3px 10px rgba(92,122,92,0.18);}
+.score-circle.band-good .num{color:var(--good);}
+.score-check.band-good{background:var(--good);}
+
+.score-circle.band-excellent{border-color:#3F7A5C;box-shadow:0 3px 10px rgba(63,122,92,0.22);}
+.score-circle.band-excellent .num{color:#3F7A5C;}
+.score-check.band-excellent{background:#3F7A5C;}
+
 .score-meta{min-width:0;flex:1;}
 .score-meta h3{font-size:20px;margin-bottom:var(--space-1);}
 .score-meta p{font-size:14px;color:var(--ink-soft);}
@@ -610,10 +706,11 @@ footer p{font-size:13px;color:var(--ink-soft);}
     min-height:0; /* required so children can shrink/scroll correctly inside a flex column */
   }
   .hero{flex:none;}
+  .essay-toolbar{flex:none;}
 
   .workspace{
     flex:1 1 auto;
-    min-height:380px; /* floor so it never gets crushed on a very short window */
+    min-height:380px; /* floor so it never gets crushed on a very short window -- lower again now that the toolbar lives outside the essay card */
     padding-bottom:var(--space-5);
     display:flex;
     flex-direction:row;
@@ -627,6 +724,7 @@ footer p{font-size:13px;color:var(--ink-soft);}
 
   .panel-input{
     flex:1 1 100%;
+    min-width:0; /* prevents essay content from ever forcing this wider than its flex-basis */
     height:auto; /* fills the workspace's actual available height via stretch, not a guessed px value */
     display:flex;
     flex-direction:column;
@@ -640,6 +738,7 @@ footer p{font-size:13px;color:var(--ink-soft);}
 
   .panel-results{
     flex:0 0 0%;
+    min-width:0; /* without this, real feedback content can force the panel wider than 0%, even while "collapsed" */
     max-height:none;   /* mobile's max-height collapse isn't used here — flex-basis handles it */
     transform:translateX(24px);
     overflow:hidden;
@@ -698,3 +797,288 @@ footer p{font-size:13px;color:var(--ink-soft);}
 @media (prefers-reduced-motion: reduce){
   *{transition:none !important; scroll-behavior:auto !important;}
 }
+
+/* --- Text Highlighting & Suggestions --- */
+.error-word {
+  text-decoration: underline wavy var(--warn);
+  text-underline-offset: 3px;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.sugg-word {
+  color: var(--good);
+  font-weight: 600;
+  background: var(--good-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.weak-word {
+  background-color: #fde8b3; /* Soft yellow highlight */
+  color: #7a5c13;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+
+.upgrade-word {
+  background-color: #d1ecf1; /* Soft blue highlight */
+  color: #0c5460;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+/* --- Textarea Highlight Backdrop --- */
+.textarea-container {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: 160px; /* hard floor -- the writing area must always stay usable, no matter how much is stacked above it (upload row, notices, prompt field) */
+  display: flex;
+  flex-direction: column;
+}
+
+textarea {
+  resize: none !important; /* Disable resize to keep backdrop aligned */
+  margin: 0;
+}
+
+.backdrop {
+  position: absolute;
+  z-index: 0;
+  inset: 0; /* Fill container */
+  overflow: hidden; /* JavaScript will handle scroll syncing */
+  pointer-events: none; /* Clicks pass through to the textarea */
+}
+
+.highlights {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: transparent; /* Text is invisible, only highlights show */
+  font-family: 'Source Serif 4', serif;
+  font-size: 17px;
+  line-height: 28px;
+  padding: 0;
+  margin: 0;
+}
+
+/* Backdrop Mark Styles */
+#highlights mark.error-word {
+  background: transparent;
+  text-decoration: underline wavy var(--warn);
+  text-underline-offset: 3px;
+  color: transparent; /* Allows textarea text to show cleanly over it */
+  pointer-events: auto; /* clickable, even though the rest of the backdrop passes clicks through */
+  cursor: pointer;
+}
+
+#highlights mark.weak-word {
+  background-color: #fde8b3;
+  color: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+#highlights mark.ignored{
+  /* Ignored words are dimmed rather than removed from the DOM entirely,
+     so there's a subtle visual trace that something was flagged and
+     dismissed here, without demanding attention again. */
+  text-decoration: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* --- Fix: Prevent backdrop highlights from shifting text alignment --- */
+#highlights .error-word,
+#highlights .weak-word {
+  /* Reset properties that change word width */
+  font-weight: normal;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+#highlights .weak-word {
+  text-decoration: none; /* Remove strikethrough from the background layer */
+  border-radius: 3px;
+  /* Use box-shadow to fake the padding visually without altering text flow */
+  box-shadow: 0 0 0 3px #fde8b3; 
+}
+/* ---------- ESSAY HISTORY ---------- */
+.history-section{
+  display:none;
+  padding-bottom:var(--space-6);
+}
+.history-section.show{display:block;}
+
+.history-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:var(--space-3);
+}
+.history-head h3{
+  font-size:16px;
+  font-weight:600;
+  font-family:'Inter',sans-serif;
+}
+
+.btn-text{
+  background:none;
+  border:none;
+  font-size:13px;
+  font-weight:600;
+  color:var(--ink-soft);
+  cursor:pointer;
+  padding:4px 6px;
+  transition:color 0.15s ease;
+}
+.btn-text:hover{color:var(--warn);}
+
+.history-list{
+  display:flex;
+  flex-direction:column;
+  gap:var(--space-2);
+}
+
+.history-row{
+  display:flex;
+  align-items:center;
+  gap:var(--space-3);
+  background:var(--paper-card);
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  padding:var(--space-3) var(--space-4);
+}
+
+.history-score{
+  flex:none;
+  width:38px;
+  height:38px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-family:'Source Serif 4',serif;
+  font-weight:700;
+  font-size:14px;
+  border:2px solid var(--good);
+  color:var(--good);
+}
+.history-score.band-low{border-color:var(--warn);color:var(--warn);}
+.history-score.band-mid{border-color:#B8862E;color:#B8862E;}
+.history-score.band-good{border-color:var(--good);color:var(--good);}
+.history-score.band-excellent{border-color:#3F7A5C;color:#3F7A5C;}
+
+.history-meta{flex:1;min-width:0;}
+.history-summary{
+  font-size:14px;
+  font-weight:600;
+  color:var(--ink);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.history-date{
+  font-size:12px;
+  color:var(--ink-soft);
+  margin-top:2px;
+}
+
+.history-load{
+  flex:none;
+  font-size:12.5px;
+  font-weight:600;
+  color:var(--ink);
+  background:transparent;
+  border:1px solid var(--rule);
+  border-radius:100px;
+  padding:6px 14px;
+  cursor:pointer;
+  transition:border-color 0.15s ease, background 0.15s ease;
+}
+.history-load:hover{border-color:var(--margin-line);background:var(--warn-bg);}
+
+.history-delete{
+  flex:none;
+  width:26px;
+  height:26px;
+  border-radius:50%;
+  border:none;
+  background:transparent;
+  color:var(--ink-soft);
+  font-size:16px;
+  line-height:1;
+  cursor:pointer;
+  transition:background 0.15s ease, color 0.15s ease;
+}
+.history-delete:hover{background:var(--warn-bg);color:var(--warn);}
+
+/* ---------- CLICK-TO-FIX POPUP (Word-style: pinpoint a flagged word,
+   replace it with a real suggestion, or ignore it for this session) ---------- */
+.fix-popup{
+  position:fixed;
+  z-index:50;
+  display:none;
+  min-width:220px;
+  max-width:300px;
+  background:var(--paper-card);
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-med);
+  padding:var(--space-3);
+}
+.fix-popup.show{display:block;}
+
+.fix-popup-word{
+  font-family:'Source Serif 4',serif;
+  font-weight:700;
+  font-size:15px;
+  color:var(--ink);
+  margin-bottom:var(--space-2);
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.fix-popup-word .original{text-decoration:line-through;color:var(--ink-soft);font-weight:400;font-size:13px;}
+
+.fix-popup-suggestions{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-bottom:var(--space-2);
+}
+.fix-suggestion-btn{
+  text-align:left;
+  font-size:13.5px;
+  font-weight:600;
+  color:var(--good);
+  background:var(--good-bg);
+  border:none;
+  border-radius:5px;
+  padding:7px 10px;
+  cursor:pointer;
+  transition:filter 0.15s ease;
+}
+.fix-suggestion-btn:hover{filter:brightness(0.96);}
+
+.fix-popup-footer{
+  display:flex;
+  justify-content:flex-end;
+  padding-top:var(--space-2);
+  border-top:1px solid var(--rule);
+}
+.fix-ignore-btn{
+  font-size:12px;
+  font-weight:600;
+  color:var(--ink-soft);
+  background:none;
+  border:none;
+  cursor:pointer;
+  padding:4px 6px;
+}
+.fix-ignore-btn:hover{color:var(--warn);}

@@ -9,79 +9,108 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
   <nav class="nav">
     <div class="wrap">
       <div class="brand"><span class="mark"></span>Marginal</div>
       <div class="nav-tag">Essay feedback, instantly</div>
     </div>
   </nav>
-
   <main class="wrap wrap-wide page-main">
     <section class="hero">
       <div class="hero-content">
         <div class="eyebrow">Automated Essay Analysis</div>
         <h1>See your essay the way a <span class="mark-word">grader</span> would.</h1>
-        <p class="lede">Paste a draft on the left. Your score and margin-style notes on structure, grammar, and vocabulary — the same things a teacher would circle in red — appear on the right.</p>
+        <p class="lede">Paste a draft on the left. Your score and margin-style notes on structure, grammar, and vocabulary, the same things a teacher would circle in red. It appears on the right.</p>
       </div>
     </section>
-
+    <div class="essay-toolbar">
+      <div class="toolbar-row">
+        <div class="prompt-field">
+          <label class="field-label" for="prompt-input">Essay prompt / topic <span class="optional-tag">(optional)</span></label>
+          <input type="text" id="prompt-input" class="prompt-input" placeholder="e.g. Discuss the impact of social media on teenage mental health">
+        </div>
+        <label class="upload-btn" for="file-input">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 8l4-4 4 4M4 15h12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Upload .pdf / .docx / .txt
+        </label>
+        <input type="file" id="file-input" accept=".pdf,.docx,.txt" hidden>
+      </div>
+      <p class="upload-notice" id="upload-notice" role="status"></p>
+    </div>
     <div class="workspace" id="workspace">
       <!-- LEFT: essay input -->
       <div class="margin-card panel-input">
         <span class="dogear" aria-hidden="true"></span>
         <label class="field-label" for="essay-input">Your essay</label>
-        <textarea id="essay-input" placeholder="Start typing or paste your essay here…"></textarea>
+        <div class="textarea-container">
+          <div class="backdrop" id="backdrop" aria-hidden="true">
+            <div class="highlights" id="highlights"></div>
+          </div>
+          <textarea id="essay-input" placeholder="Start typing or paste your essay here " spellcheck="false"></textarea>
+        </div>
         <div class="card-footer">
           <span class="word-count"><strong id="word-count">0</strong> words</span>
           <button class="btn-primary" id="analyze-btn" disabled>Analyze essay</button>
         </div>
         <p class="api-error" id="api-error" role="alert"></p>
       </div>
-
       <!-- RIGHT: results (hidden until analyzed, animates in) -->
       <div class="panel-results" id="results">
         <div class="score-row">
           <div class="score-circle" id="score-circle">
-            <span class="num" id="score-num">–</span>
+            <span class="num" id="score-num"> </span>
             <span class="out-of">out of 100</span>
-            <svg class="score-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13l4.5 5L20 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="score-check" id="score-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13l4.5 5L20 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
           <div class="score-meta">
-            <h3 id="score-summary">Analyzing…</h3>
+            <h3 id="score-summary">Analyzing </h3>
             <p id="score-stats"></p>
           </div>
         </div>
-
         <div class="annotations" id="annotations">
-          <!-- Feedback cards are generated dynamically from the API response — see renderResults() below -->
+          <!-- Feedback cards are generated dynamically from the API response   see renderResults() below -->
         </div>
-
         <div class="results-footer">
           <button class="btn-secondary" id="reset-btn">Analyze another essay</button>
         </div>
       </div>
     </div>
+    <section class="history-section" id="history-section">
+      <div class="history-head">
+        <h3>Previous attempts</h3>
+        <button class="btn-text" id="clear-history-btn">Clear history</button>
+      </div>
+      <div class="history-list" id="history-list"></div>
+    </section>
   </main>
-
+  <!-- Click-to-fix popup: appears when a flagged word in the essay is clicked -->
+  <div class="fix-popup" id="fix-popup" role="dialog" aria-label="Word suggestions"></div>
   <footer>
-    <p>Built for academic feedback — not a substitute for instructor review.</p>
+    <p>Built for academic feedback. Not a substitute for instructor review.</p>
   </footer>
 
 <script>
   const API_URL = 'http://127.0.0.1:5000/analyze';
-
   const textarea = document.getElementById('essay-input');
   const wordCountEl = document.getElementById('word-count');
   const analyzeBtn = document.getElementById('analyze-btn');
   const workspace = document.getElementById('workspace');
   const resetBtn = document.getElementById('reset-btn');
   const apiError = document.getElementById('api-error');
-
   const scoreNum = document.getElementById('score-num');
+  const scoreCircle = document.getElementById('score-circle');
+  const scoreCheck = document.getElementById('score-check');
   const scoreSummary = document.getElementById('score-summary');
   const scoreStats = document.getElementById('score-stats');
   const annotationsEl = document.getElementById('annotations');
+  const backdrop = document.getElementById('backdrop');
+  const highlightsEl = document.getElementById('highlights');
+  const fileInput = document.getElementById('file-input');
+  const promptInput = document.getElementById('prompt-input');
+  const uploadNotice = document.getElementById('upload-notice');
+  const historyList = document.getElementById('history-list');
+  const clearHistoryBtn = document.getElementById('clear-history-btn');
+  const fixPopup = document.getElementById('fix-popup');
 
   function countWords(text){
     const trimmed = text.trim();
@@ -89,19 +118,377 @@
     return trimmed.split(/\s+/).length;
   }
 
+  // The last set of issues returned by the API, kept client-side so we can
+  // re-render highlights after every edit/ignore without another API call.
+  let lastIssues = { spelling: [], weak_words: [] };
+
+  // Words the user has dismissed with "Ignore" this session. Keyed as
+  // "type:word" so a word could theoretically be ignored as one type but
+  // still flagged as the other.
+  let ignoredWords = new Set();
+
+  // Clear highlights if user edits the text after analysis
   textarea.addEventListener('input', () => {
     const count = countWords(textarea.value);
     wordCountEl.textContent = count;
-    analyzeBtn.disabled = count < 30; // require a minimal essay length
+    analyzeBtn.disabled = count < 30;
+    highlightsEl.innerHTML = '';
+    closeFixPopup();
   });
+
+  // Sync scroll between textarea and the highlight backdrop
+  textarea.addEventListener('scroll', () => {
+    backdrop.scrollTop = textarea.scrollTop;
+    closeFixPopup();
+  });
+
+  function escapeHtml(s){
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // Builds highlighted HTML from the RAW text plus structured issue data,
+  // tracking each match's exact character offset (data-start/data-end) so
+  // a click can precisely splice just THAT occurrence -- not every
+  // occurrence of the word in the essay.
+  function applyHighlights(text, issues) {
+    lastIssues = issues || { spelling: [], weak_words: [] };
+    const entries = [];
+
+    (lastIssues.spelling || []).forEach(item => {
+      if (!ignoredWords.has('spelling:' + item.word.toLowerCase())) {
+        entries.push({ word: item.word, type: 'spelling', suggestion: item.suggestion });
+      }
+    });
+
+    (lastIssues.weak_words || []).forEach(item => {
+      if (!ignoredWords.has('weak:' + item.word.toLowerCase())) {
+        entries.push({ word: item.word, type: 'weak', suggestions: item.suggestions || [] });
+      }
+    });
+
+    // Find every occurrence of every flagged word in the raw text, with
+    // exact start/end offsets.
+    let matches = [];
+    entries.forEach(entry => {
+      const escaped = entry.word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+      let m;
+      while ((m = regex.exec(text)) !== null) {
+        matches.push({
+          start: m.index,
+          end: m.index + m[0].length,
+          matchedText: m[0],
+          type: entry.type,
+          suggestion: entry.suggestion,
+          suggestions: entry.suggestions,
+        });
+      }
+    });
+
+    // Sort by position, drop any overlaps (keep the first found)
+    matches.sort((a, b) => a.start - b.start);
+    matches = matches.filter((m, i) => i === 0 || m.start >= matches[i - 1].end);
+
+    let html = '';
+    let cursor = 0;
+    matches.forEach(m => {
+      html += escapeHtml(text.slice(cursor, m.start));
+      const cls = m.type === 'spelling' ? 'error-word' : 'weak-word';
+      const suggestionAttr = m.type === 'spelling'
+        ? `data-suggestion="${escapeHtml(m.suggestion || '')}"`
+        : `data-suggestions="${escapeHtml(JSON.stringify(m.suggestions || []))}"`;
+      
+      html += `<mark class="${cls}" data-start="${m.start}" data-end="${m.end}" data-type="${m.type}" data-word="${escapeHtml(m.matchedText)}" ${suggestionAttr}>${escapeHtml(m.matchedText)}</mark>`;
+      cursor = m.end;
+    });
+    html += escapeHtml(text.slice(cursor));
+    if (html[html.length - 1] === '\n') html += ' '; // trailing-newline rendering fix
+    highlightsEl.innerHTML = html;
+  }
+
+  // --- Click-to-fix popup ---
+  function closeFixPopup(){
+    fixPopup.classList.remove('show');
+    fixPopup.innerHTML = '';
+  }
+
+  textarea.addEventListener('click', (e) => {
+    // 1. Get the exact character position of the user's cursor
+    const cursor = textarea.selectionStart;
+    
+    // 2. Find if any <mark> tag covers this character range
+    const marks = Array.from(highlightsEl.querySelectorAll('mark'));
+    const mark = marks.find(m => {
+      const start = parseInt(m.dataset.start, 10);
+      const end = parseInt(m.dataset.end, 10);
+      return cursor >= start && cursor <= end;
+    });
+
+    // 3. If they didn't click on a word, close the popup and stop
+    if (!mark) {
+      closeFixPopup();
+      return;
+    }
+
+    // 4. If they did, extract the data and run the popup logic
+    const start = parseInt(mark.dataset.start, 10);
+    const end = parseInt(mark.dataset.end, 10);
+    const type = mark.dataset.type;
+    const word = mark.dataset.word;
+    
+    let bodyHtml = '';
+    if (type === 'spelling') {
+      const suggestion = mark.dataset.suggestion;
+      bodyHtml = suggestion
+        ? `<div class="fix-popup-suggestions"><button class="fix-suggestion-btn" data-replacement="${escapeHtml(suggestion)}">${escapeHtml(suggestion)}</button></div>`
+        : `<p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:var(--space-2)">No suggestion available for this word.</p>`;
+    } else {
+      const suggestions = JSON.parse(mark.dataset.suggestions || '[]');
+      bodyHtml = suggestions.length > 0
+        ? `<div class="fix-popup-suggestions">${suggestions.map(s => `<button class="fix-suggestion-btn" data-replacement="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
+        : `<p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:var(--space-2)">No suggestion available for this word.</p>`;
+    }
+    
+    fixPopup.innerHTML = `
+      <div class="fix-popup-word"><span class="original">${escapeHtml(word)}</span></div>
+      ${bodyHtml}
+      <div class="fix-popup-footer">
+        <button class="fix-ignore-btn" id="fix-ignore-btn">Ignore</button>
+      </div>
+    `;
+    
+    // Position near the clicked word, keeping the popup on-screen
+    const rect = mark.getBoundingClientRect();
+    const popupWidth = 260;
+    let left = rect.left;
+    if (left + popupWidth > window.innerWidth - 16) left = window.innerWidth - popupWidth - 16;
+    fixPopup.style.left = `${Math.max(16, left)}px`;
+    fixPopup.style.top = `${rect.bottom + 6}px`;
+    fixPopup.classList.add('show');
+    
+    // Wire up the buttons just rendered
+    fixPopup.querySelectorAll('.fix-suggestion-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const replacement = btn.dataset.replacement;
+        const current = textarea.value;
+        const newText = current.slice(0, start) + replacement + current.slice(end);
+        textarea.value = newText;
+        const newCursor = start + replacement.length;
+        textarea.focus();
+        textarea.setSelectionRange(newCursor, newCursor);
+        textarea.dispatchEvent(new Event('input')); // updates word count
+        applyHighlights(newText, lastIssues); // re-render against the edited text
+        closeFixPopup();
+      });
+    });
+    
+    document.getElementById('fix-ignore-btn').addEventListener('click', () => {
+      ignoredWords.add(type + ':' + word.toLowerCase());
+      applyHighlights(textarea.value, lastIssues);
+      closeFixPopup();
+    });
+  });
+
+  // Close the popup on outside click or Escape
+  document.addEventListener('click', (e) => {
+    if (!fixPopup.contains(e.target) && !e.target.closest('mark') && e.target !== textarea) closeFixPopup();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeFixPopup();
+  });
+
+  // --- File upload (.pdf / .docx / .txt) ---
+  const EXTRACT_URL = 'http://127.0.0.1:5000/extract-text';
+
+  // A rough sanity threshold -- this tool is designed for essay-length text
+  // (typically a few hundred to ~1500 words). Uploading a full document or
+  // report will still "work" (nothing crashes), but the score/feedback
+  // were calibrated on essay-length writing, so results get less meaningful
+  // the further past this you go -- worth telling the user honestly instead
+  // of silently producing a number that looks confident but isn't.
+  const LONG_DOCUMENT_WORD_THRESHOLD = 2500;
+
+  function showUploadNotice(message, isInfo){
+    uploadNotice.textContent = message;
+    uploadNotice.classList.toggle('info', !!isInfo);
+    uploadNotice.classList.add('show');
+  }
+
+  function clearUploadNotice(){
+    uploadNotice.textContent = '';
+    uploadNotice.classList.remove('show', 'info');
+  }
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    clearUploadNotice();
+    clearError();
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(EXTRACT_URL, { method: 'POST', body: formData });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not read this file.');
+      }
+
+      textarea.value = data.essay;
+      textarea.scrollTop = 0;
+      backdrop.scrollTop = 0;
+      textarea.dispatchEvent(new Event('input')); // updates word count + enables Analyze
+
+      const wordCount = countWords(data.essay);
+      const messages = [];
+
+      if (wordCount > LONG_DOCUMENT_WORD_THRESHOLD) {
+        messages.push(
+          `This file is ${wordCount.toLocaleString()} words. Much longer than a typical essay. ` +
+          `Scoring is calibrated on essay-length writing, so results on a full document may not be meaningful. ` +
+          `Consider trimming to the relevant section before analyzing.`
+        );
+      }
+
+      if (data.warnings && data.warnings.length > 0) {
+        messages.push(...data.warnings);
+      }
+
+      if (messages.length > 0) {
+        showUploadNotice(messages.join(' '), true);
+      } else {
+        showUploadNotice(`Loaded "${file.name}". Review the text below, then click Analyze.`, false);
+      }
+
+    } catch (err) {
+      const isNetworkError = err instanceof TypeError;
+      showError(
+        isNetworkError
+          ? 'Could not reach the server to read this file. Make sure app.py is running.'
+          : err.message
+      );
+    } finally {
+      fileInput.value = ''; // allow re-selecting the same file later
+    }
+  });
+
+  // --- Essay history (stored locally in the browser, no backend needed) ---
+  const HISTORY_KEY = 'marginal_essay_history';
+  const HISTORY_LIMIT = 10;
+
+  function loadHistory(){
+    try {
+      return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveHistoryEntry(entry){
+    const history = loadHistory();
+    history.unshift(entry); // newest first
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, HISTORY_LIMIT)));
+    renderHistory();
+  }
+
+  function deleteHistoryEntry(id){
+    const history = loadHistory().filter(e => e.id !== id);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    renderHistory();
+  }
+
+  function formatTimestamp(iso){
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+           '   ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function renderHistory(){
+    const history = loadHistory();
+    const section = document.getElementById('history-section');
+    
+    if (history.length === 0) {
+      section.classList.remove('show');
+      return;
+    }
+
+    section.classList.add('show');
+    historyList.innerHTML = '';
+
+    history.forEach(entry => {
+      const row = document.createElement('div');
+      row.className = 'history-row';
+      row.innerHTML = `
+        <span class="history-score ${scoreBand(entry.score)}">${entry.score}</span>
+        <div class="history-meta">
+          <p class="history-summary">${entry.summary}</p>
+          <p class="history-date">${formatTimestamp(entry.date)}   ${entry.wordCount} words</p>
+        </div>
+        <button class="history-load" title="Load this essay back into the editor">Load</button>
+        <button class="history-delete" title="Remove from history" aria-label="Remove from history"> </button>
+      `;
+
+      row.querySelector('.history-load').addEventListener('click', () => {
+        textarea.value = entry.essay;
+        textarea.scrollTop = 0;
+        backdrop.scrollTop = 0;
+        textarea.dispatchEvent(new Event('input'));
+        workspace.classList.remove('has-results');
+        clearUploadNotice();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+
+      row.querySelector('.history-delete').addEventListener('click', () => deleteHistoryEntry(entry.id));
+
+      historyList.appendChild(row);
+    });
+  }
+
+  clearHistoryBtn.addEventListener('click', () => {
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+  });
+
+  renderHistory(); // populate on page load, in case there's saved history already
+
+  // <50 needs work, 50-69 developing, 70-84 solid, 85+ excellent.
+  function scoreBand(score){
+    if (score >= 85) return 'band-excellent';
+    if (score >= 70) return 'band-good';
+    if (score >= 50) return 'band-mid';
+    return 'band-low';
+  }
+
+  // One badge icon per band, so the icon itself agrees with the score 
+  // not just the color. A checkmark on a 29/100 was misleading.
+  const BAND_ICONS = {
+    'band-low':
+      '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>', // X
+    'band-mid':
+      '<path d="M12 5v9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="12" cy="18" r="1.4" fill="currentColor"/>', // !
+    'band-good':
+      '<path d="M4 13l4.5 5L20 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>', // check
+    'band-excellent': '<path d="M12 2.5l2.6 5.9 6.4.6-4.8 4.3 1.4 6.3L12 16.5l-5.6 3.1 1.4-6.3-4.8-4.3 6.4-.6z" fill="currentColor"/>', // star
+  };
 
   function renderResults(data){
     scoreNum.textContent = data.score;
-    scoreSummary.textContent = data.summary;
-    scoreStats.textContent =
-      `${data.stats.word_count} words, ${data.stats.sentence_count} sentences analyzed.`;
+    
+    scoreCircle.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    scoreCheck.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    
+    const band = scoreBand(data.score);
+    scoreCircle.classList.add(band);
+    scoreCheck.classList.add(band);
+    scoreCheck.innerHTML = BAND_ICONS[band];
 
-    // Build one annotation card per feedback category returned by the API
+    scoreSummary.textContent = data.summary;
+    scoreStats.textContent = `${data.stats.word_count} words, ${data.stats.sentence_count} sentences analyzed.`;
+    
     annotationsEl.innerHTML = '';
     data.feedback.forEach(item => {
       const card = document.createElement('div');
@@ -115,6 +502,10 @@
       `;
       annotationsEl.appendChild(card);
     });
+
+    // Run the highlighter!
+    ignoredWords.clear(); // fresh analysis -- previous session's ignores shouldn't carry over
+    applyHighlights(textarea.value, data.issues);
   }
 
   function showError(message){
@@ -131,16 +522,16 @@
     clearError();
     analyzeBtn.disabled = true;
     const originalLabel = analyzeBtn.textContent;
-    analyzeBtn.textContent = 'Analyzing…';
-
+    analyzeBtn.textContent = 'Analyzing...';
+    
     try {
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ essay: textarea.value })
+        body: JSON.stringify({ essay: textarea.value, prompt: promptInput.value })
       });
-      const data = await response.json();
 
+      const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || 'Analysis failed. Please try again.');
       }
@@ -148,16 +539,22 @@
       renderResults(data);
       workspace.classList.add('has-results');
 
+      saveHistoryEntry({
+        id: Date.now(),
+        date: new Date().toISOString(),
+        score: data.score,
+        summary: data.summary,
+        wordCount: data.stats.word_count,
+        essay: textarea.value,
+      });
+
     } catch (err) {
-      // Most common cause during development: the Flask server (app.py)
-      // isn't running, or is running on a different port.
       const isNetworkError = err instanceof TypeError;
       showError(
         isNetworkError
           ? 'Could not reach the analysis server. Make sure app.py is running (python app.py) at ' + API_URL
           : err.message
       );
-
     } finally {
       analyzeBtn.disabled = countWords(textarea.value) < 30;
       analyzeBtn.textContent = originalLabel;
@@ -165,20 +562,27 @@
   });
 
   resetBtn.addEventListener('click', () => {
-  textarea.value = '';
-  wordCountEl.textContent = '0';
-  analyzeBtn.disabled = true;
-  workspace.classList.remove('has-results');
-  clearError();
-  
-  // FIX: Clear the old results so they don't stretch the flex container
-  annotationsEl.innerHTML = '';
-  scoreNum.textContent = '';
-  scoreSummary.textContent = 'Analyzing...';
-  scoreStats.textContent = '';
+    textarea.value = '';
+    wordCountEl.textContent = '0';
+    analyzeBtn.disabled = true;
+    workspace.classList.remove('has-results');
+    clearError();
+    clearUploadNotice();
+    
+    // Clear out UI
+    annotationsEl.innerHTML = '';
+    highlightsEl.innerHTML = '';
+    ignoredWords.clear();
+    closeFixPopup();
 
-  textarea.focus();
-});
+    scoreNum.textContent = '';
+    scoreCircle.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    scoreCheck.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    scoreCheck.innerHTML = BAND_ICONS['band-good']; // neutral default until the next result comes in
+    scoreSummary.textContent = 'Analyzing...';
+    scoreStats.textContent = '';
+    textarea.focus();
+  });
 </script>
 </body>
 </html>
