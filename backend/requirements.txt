@@ -8,3 +8,5 @@ transformers
 torch
 pypdf
 python-docx
+matplotlib
+sentence-transformers

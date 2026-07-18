@@ -36,6 +36,15 @@
         <input type="file" id="file-input" accept=".pdf,.docx,.txt" hidden>
       </div>
       <p class="upload-notice" id="upload-notice" role="status"></p>
+
+      <div class="criteria-row">
+        <span class="criteria-label">Feedback categories:</span>
+        <label class="criteria-check"><input type="checkbox" value="Grammar" checked> Grammar</label>
+        <label class="criteria-check"><input type="checkbox" value="Structure" checked> Structure</label>
+        <label class="criteria-check"><input type="checkbox" value="Vocabulary" checked> Vocabulary</label>
+        <label class="criteria-check"><input type="checkbox" value="Coherence" checked> Coherence</label>
+        <label class="criteria-check"><input type="checkbox" value="Relevance" checked> Relevance</label>
+      </div>
     </div>
     <div class="workspace" id="workspace">
       <!-- LEFT: essay input -->
@@ -68,7 +77,7 @@
           </div>
         </div>
         <div class="annotations" id="annotations">
-          <!-- Feedback cards are generated dynamically from the API response   see renderResults() below -->
+          <!-- Feedback cards are generated dynamically from the API response -->
         </div>
         <div class="results-footer">
           <button class="btn-secondary" id="reset-btn">Analyze another essay</button>
@@ -83,7 +92,8 @@
       <div class="history-list" id="history-list"></div>
     </section>
   </main>
-  <!-- Click-to-fix popup: appears when a flagged word in the essay is clicked -->
+  
+  <!-- Click-to-fix / Synonyms popup -->
   <div class="fix-popup" id="fix-popup" role="dialog" aria-label="Word suggestions"></div>
   <footer>
     <p>Built for academic feedback. Not a substitute for instructor review.</p>
@@ -112,29 +122,48 @@
   const clearHistoryBtn = document.getElementById('clear-history-btn');
   const fixPopup = document.getElementById('fix-popup');
 
+  let typingTimer;
+  const DONE_TYPING_INTERVAL = 1200; // 1.2 seconds for real-time analysis
+  let lastIssues = { spelling: [], weak_words: [] };
+  let ignoredWords = new Set();
+
   function countWords(text){
     const trimmed = text.trim();
     if(!trimmed) return 0;
     return trimmed.split(/\s+/).length;
   }
 
-  // The last set of issues returned by the API, kept client-side so we can
-  // re-render highlights after every edit/ignore without another API call.
-  let lastIssues = { spelling: [], weak_words: [] };
+  function escapeHtml(s){
+    // IMPORTANT: quotes must be escaped too, not just &/</>. This was the
+    // actual bug preventing the vocabulary popup from working: suggestion
+    // arrays get JSON.stringify'd (producing a string full of literal "
+    // characters) before being embedded inside an HTML attribute like
+    // data-suggestions="...". Without escaping those embedded quotes, the
+    // HTML attribute closes early and corrupts the tag -- JSON.parse() on
+    // the resulting garbled dataset value then throws, silently killing
+    // the click handler with no visible error. Spelling (which used to
+    // store a single plain word, no embedded quotes) never hit this.
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
 
-  // Words the user has dismissed with "Ignore" this session. Keyed as
-  // "type:word" so a word could theoretically be ignored as one type but
-  // still flagged as the other.
-  let ignoredWords = new Set();
+  // Position popup helper
+  function positionPopup(x, y) {
+    const popupWidth = 260;
+    let left = x;
+    if (left + popupWidth > window.innerWidth - 16) left = window.innerWidth - popupWidth - 16;
+    fixPopup.style.left = `${Math.max(16, left)}px`;
+    fixPopup.style.top = `${y}px`;
+  }
 
-  // Clear highlights if user edits the text after analysis
-  textarea.addEventListener('input', () => {
-    const count = countWords(textarea.value);
-    wordCountEl.textContent = count;
-    analyzeBtn.disabled = count < 30;
-    highlightsEl.innerHTML = '';
-    closeFixPopup();
-  });
+  function closeFixPopup(){
+    fixPopup.classList.remove('show');
+    fixPopup.innerHTML = '';
+  }
 
   // Sync scroll between textarea and the highlight backdrop
   textarea.addEventListener('scroll', () => {
@@ -142,21 +171,31 @@
     closeFixPopup();
   });
 
-  function escapeHtml(s){
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
+  // Main Input Listener - handles Word Count, Highlights Reset, and Real-Time Analysis Trigger
+  textarea.addEventListener('input', () => {
+    const count = countWords(textarea.value);
+    wordCountEl.textContent = count;
+    analyzeBtn.disabled = count < 30;
+    highlightsEl.innerHTML = '';
+    closeFixPopup();
 
-  // Builds highlighted HTML from the RAW text plus structured issue data,
-  // tracking each match's exact character offset (data-start/data-end) so
-  // a click can precisely splice just THAT occurrence -- not every
-  // occurrence of the word in the essay.
+    // Auto-update score and cards when user makes a fix manually
+    clearTimeout(typingTimer);
+    if (workspace.classList.contains('has-results') && count >= 30) {
+      typingTimer = setTimeout(() => {
+        analyzeEssay(false); // false = don't clog history log with auto-updates
+      }, DONE_TYPING_INTERVAL);
+    }
+  });
+
+  // Re-runs the exact same highlights logic from before
   function applyHighlights(text, issues) {
     lastIssues = issues || { spelling: [], weak_words: [] };
     const entries = [];
 
     (lastIssues.spelling || []).forEach(item => {
       if (!ignoredWords.has('spelling:' + item.word.toLowerCase())) {
-        entries.push({ word: item.word, type: 'spelling', suggestion: item.suggestion });
+        entries.push({ word: item.word, type: 'spelling', suggestions: item.suggestions || [] });
       }
     });
 
@@ -166,8 +205,6 @@
       }
     });
 
-    // Find every occurrence of every flagged word in the raw text, with
-    // exact start/end offsets.
     let matches = [];
     entries.forEach(entry => {
       const escaped = entry.word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -179,13 +216,11 @@
           end: m.index + m[0].length,
           matchedText: m[0],
           type: entry.type,
-          suggestion: entry.suggestion,
           suggestions: entry.suggestions,
         });
       }
     });
 
-    // Sort by position, drop any overlaps (keep the first found)
     matches.sort((a, b) => a.start - b.start);
     matches = matches.filter((m, i) => i === 0 || m.start >= matches[i - 1].end);
 
@@ -194,91 +229,65 @@
     matches.forEach(m => {
       html += escapeHtml(text.slice(cursor, m.start));
       const cls = m.type === 'spelling' ? 'error-word' : 'weak-word';
-      const suggestionAttr = m.type === 'spelling'
-        ? `data-suggestion="${escapeHtml(m.suggestion || '')}"`
-        : `data-suggestions="${escapeHtml(JSON.stringify(m.suggestions || []))}"`;
-      
+      // Both types now carry the same "suggestions" array shape -- no more
+      // type-based branching needed here, which is also what eliminates
+      // the single-suggestion limitation spelling used to have.
+      const suggestionAttr = `data-suggestions="${escapeHtml(JSON.stringify(m.suggestions || []))}"`;
+
       html += `<mark class="${cls}" data-start="${m.start}" data-end="${m.end}" data-type="${m.type}" data-word="${escapeHtml(m.matchedText)}" ${suggestionAttr}>${escapeHtml(m.matchedText)}</mark>`;
       cursor = m.end;
     });
     html += escapeHtml(text.slice(cursor));
-    if (html[html.length - 1] === '\n') html += ' '; // trailing-newline rendering fix
+    if (html[html.length - 1] === '\n') html += ' '; 
     highlightsEl.innerHTML = html;
   }
 
-  // --- Click-to-fix popup ---
-  function closeFixPopup(){
-    fixPopup.classList.remove('show');
-    fixPopup.innerHTML = '';
-  }
-
+  // Click-to-Fix for highlighted errors/weak words
   textarea.addEventListener('click', (e) => {
-    // 1. Get the exact character position of the user's cursor
     const cursor = textarea.selectionStart;
-    
-    // 2. Find if any <mark> tag covers this character range
     const marks = Array.from(highlightsEl.querySelectorAll('mark'));
-    const mark = marks.find(m => {
-      const start = parseInt(m.dataset.start, 10);
-      const end = parseInt(m.dataset.end, 10);
-      return cursor >= start && cursor <= end;
-    });
+    const mark = marks.find(m => cursor >= parseInt(m.dataset.start, 10) && cursor <= parseInt(m.dataset.end, 10));
 
-    // 3. If they didn't click on a word, close the popup and stop
     if (!mark) {
       closeFixPopup();
       return;
     }
 
-    // 4. If they did, extract the data and run the popup logic
     const start = parseInt(mark.dataset.start, 10);
     const end = parseInt(mark.dataset.end, 10);
     const type = mark.dataset.type;
     const word = mark.dataset.word;
-    
-    let bodyHtml = '';
-    if (type === 'spelling') {
-      const suggestion = mark.dataset.suggestion;
-      bodyHtml = suggestion
-        ? `<div class="fix-popup-suggestions"><button class="fix-suggestion-btn" data-replacement="${escapeHtml(suggestion)}">${escapeHtml(suggestion)}</button></div>`
-        : `<p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:var(--space-2)">No suggestion available for this word.</p>`;
-    } else {
-      const suggestions = JSON.parse(mark.dataset.suggestions || '[]');
-      bodyHtml = suggestions.length > 0
-        ? `<div class="fix-popup-suggestions">${suggestions.map(s => `<button class="fix-suggestion-btn" data-replacement="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
-        : `<p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:var(--space-2)">No suggestion available for this word.</p>`;
-    }
-    
+
+    // Both spelling and vocabulary marks carry the same suggestions-array
+    // shape now, so no type branching is needed here anymore -- this also
+    // means spelling can offer multiple candidates, not just one.
+    const suggestions = JSON.parse(mark.dataset.suggestions || '[]');
+    const bodyHtml = suggestions.length > 0
+      ? `<div class="fix-popup-suggestions">${suggestions.map(s => `<button class="fix-suggestion-btn" data-replacement="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
+      : `<p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:var(--space-2)">No suggestion available.</p>`;
+
     fixPopup.innerHTML = `
       <div class="fix-popup-word"><span class="original">${escapeHtml(word)}</span></div>
       ${bodyHtml}
-      <div class="fix-popup-footer">
-        <button class="fix-ignore-btn" id="fix-ignore-btn">Ignore</button>
-      </div>
+      <div class="fix-popup-footer"><button class="fix-ignore-btn" id="fix-ignore-btn">Ignore</button></div>
     `;
     
-    // Position near the clicked word, keeping the popup on-screen
     const rect = mark.getBoundingClientRect();
-    const popupWidth = 260;
-    let left = rect.left;
-    if (left + popupWidth > window.innerWidth - 16) left = window.innerWidth - popupWidth - 16;
-    fixPopup.style.left = `${Math.max(16, left)}px`;
-    fixPopup.style.top = `${rect.bottom + 6}px`;
+    positionPopup(rect.left, rect.bottom + 6);
     fixPopup.classList.add('show');
     
-    // Wire up the buttons just rendered
     fixPopup.querySelectorAll('.fix-suggestion-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const replacement = btn.dataset.replacement;
         const current = textarea.value;
-        const newText = current.slice(0, start) + replacement + current.slice(end);
-        textarea.value = newText;
+        textarea.value = current.slice(0, start) + replacement + current.slice(end);
         const newCursor = start + replacement.length;
         textarea.focus();
         textarea.setSelectionRange(newCursor, newCursor);
-        textarea.dispatchEvent(new Event('input')); // updates word count
-        applyHighlights(newText, lastIssues); // re-render against the edited text
+        
+        applyHighlights(textarea.value, lastIssues);
         closeFixPopup();
+        analyzeEssay(false); // Trigger real-time backend evaluation
       });
     });
     
@@ -289,24 +298,200 @@
     });
   });
 
+  // NEW: Double-click any word to fetch live Synonyms
+  textarea.addEventListener('dblclick', async (e) => {
+    const cursor = textarea.selectionStart;
+    const text = textarea.value;
+    
+    // If it's already a highlighted mistake, let the click listener handle it
+    const marks = Array.from(highlightsEl.querySelectorAll('mark'));
+    const isMark = marks.some(m => cursor >= parseInt(m.dataset.start, 10) && cursor <= parseInt(m.dataset.end, 10));
+    if (isMark) return; 
+
+    // Find full word boundaries based on cursor position
+    let start = cursor;
+    while (start > 0 && /[a-zA-Z']/.test(text[start - 1])) start--;
+    let end = cursor;
+    while (end < text.length && /[a-zA-Z']/.test(text[end])) end++;
+    
+    const word = text.slice(start, end).trim();
+    if (word.length < 2) return;
+
+    positionPopup(e.clientX, e.clientY + 15);
+    fixPopup.innerHTML = `<div class="fix-popup-word"><span class="original">${escapeHtml(word)}</span></div><p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:var(--space-2)">Finding synonyms...</p>`;
+    fixPopup.classList.add('show');
+
+    try {
+      const res = await fetch(`https://api.datamuse.com/words?rel_syn=${word}&max=4`);
+      const syns = await res.json();
+      
+      if (syns.length === 0) {
+        fixPopup.innerHTML = `<div class="fix-popup-word"><span class="original">${escapeHtml(word)}</span></div><p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:var(--space-2)">No synonyms found.</p>`;
+        return;
+      }
+
+      const bodyHtml = `<div class="fix-popup-suggestions">${syns.map(s => `<button class="fix-suggestion-btn" data-replacement="${escapeHtml(s.word)}">${escapeHtml(s.word)}</button>`).join('')}</div>`;
+      fixPopup.innerHTML = `<div class="fix-popup-word"><span class="original">${escapeHtml(word)}</span></div>${bodyHtml}`;
+      
+      fixPopup.querySelectorAll('.fix-suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const replacement = btn.dataset.replacement;
+          const current = textarea.value;
+          textarea.value = current.slice(0, start) + replacement + current.slice(end);
+          const newCursor = start + replacement.length;
+          textarea.focus();
+          textarea.setSelectionRange(newCursor, newCursor);
+          
+          closeFixPopup();
+          analyzeEssay(false); // Trigger real-time backend evaluation
+        });
+      });
+    } catch(err) {
+      fixPopup.classList.remove('show');
+    }
+  });
+
   // Close the popup on outside click or Escape
   document.addEventListener('click', (e) => {
     if (!fixPopup.contains(e.target) && !e.target.closest('mark') && e.target !== textarea) closeFixPopup();
   });
-
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeFixPopup();
   });
 
-  // --- File upload (.pdf / .docx / .txt) ---
-  const EXTRACT_URL = 'http://127.0.0.1:5000/extract-text';
 
-  // A rough sanity threshold -- this tool is designed for essay-length text
-  // (typically a few hundred to ~1500 words). Uploading a full document or
-  // report will still "work" (nothing crashes), but the score/feedback
-  // were calibrated on essay-length writing, so results get less meaningful
-  // the further past this you go -- worth telling the user honestly instead
-  // of silently producing a number that looks confident but isn't.
+  // --- Centralized API Caller ---
+  async function analyzeEssay(saveHistory = true) {
+    clearError();
+    const originalLabel = analyzeBtn.textContent;
+    analyzeBtn.textContent = 'Analyzing...';
+    analyzeBtn.disabled = true;
+    
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          essay: textarea.value,
+          prompt: promptInput.value,
+          enabled_categories: Array.from(document.querySelectorAll('.criteria-check input:checked')).map(cb => cb.value),
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Analysis failed. Please try again.');
+
+      renderResults(data);
+      workspace.classList.add('has-results');
+
+      if (saveHistory) {
+        saveHistoryEntry({
+          essay: textarea.value,
+          score: data.score,
+          baseline_score: data.baseline_score,
+          transformer_score: data.transformer_score,
+          summary: data.summary,
+          word_count: data.stats.word_count,
+          feedback: data.feedback,
+        });
+      }
+    } catch (err) {
+      const isNetworkError = err instanceof TypeError;
+      showError(isNetworkError ? 'Could not reach the analysis server.' : err.message);
+    } finally {
+      analyzeBtn.disabled = countWords(textarea.value) < 30;
+      analyzeBtn.textContent = originalLabel;
+    }
+  }
+
+  // Hook up button
+  analyzeBtn.addEventListener('click', () => analyzeEssay(true));
+
+  // --- Rendering UI Updates ---
+  function scoreBand(score){
+    if (score >= 85) return 'band-excellent';
+    if (score >= 70) return 'band-good';
+    if (score >= 50) return 'band-mid';
+    return 'band-low';
+  }
+
+  const BAND_ICONS = {
+    'band-low': '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>',
+    'band-mid': '<path d="M12 5v9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="12" cy="18" r="1.4" fill="currentColor"/>',
+    'band-good': '<path d="M4 13l4.5 5L20 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    'band-excellent': '<path d="M12 2.5l2.6 5.9 6.4.6-4.8 4.3 1.4 6.3L12 16.5l-5.6 3.1 1.4-6.3-4.8-4.3 6.4-.6z" fill="currentColor"/>',
+  };
+
+  function renderResults(data){
+    scoreNum.textContent = data.score;
+    
+    scoreCircle.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    scoreCheck.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    
+    const band = scoreBand(data.score);
+    scoreCircle.classList.add(band);
+    scoreCheck.classList.add(band);
+    scoreCheck.innerHTML = BAND_ICONS[band];
+
+    scoreSummary.textContent = data.summary;
+    scoreStats.textContent = `${data.stats.word_count} words, ${data.stats.sentence_count} sentences analyzed.`;
+    if (data.transformer_score !== null && data.transformer_score !== undefined) {
+      scoreStats.textContent += ` · Transformer: ${data.transformer_score} · Baseline: ${data.baseline_score}`;
+    }
+    
+    annotationsEl.innerHTML = '';
+    data.feedback.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'annotation' + (item.status === 'good' ? ' good' : '');
+      card.innerHTML = `
+        <div class="annotation-head">
+          <h4>${item.category}</h4>
+          <span class="pill ${item.status === 'good' ? 'good' : 'warn'}">${item.label}</span>
+        </div>
+        <p>${item.note}</p>
+      `;
+      annotationsEl.appendChild(card);
+    });
+
+    applyHighlights(textarea.value, data.issues);
+  }
+
+  // --- Reset & Error logic ---
+  function showError(message){
+    apiError.textContent = message;
+    apiError.classList.add('show');
+  }
+
+  function clearError(){
+    apiError.textContent = '';
+    apiError.classList.remove('show');
+  }
+
+  resetBtn.addEventListener('click', () => {
+    textarea.value = '';
+    wordCountEl.textContent = '0';
+    analyzeBtn.disabled = true;
+    workspace.classList.remove('has-results');
+    clearError();
+    clearUploadNotice();
+    
+    annotationsEl.innerHTML = '';
+    highlightsEl.innerHTML = '';
+    ignoredWords.clear();
+    closeFixPopup();
+
+    scoreNum.textContent = '';
+    scoreCircle.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    scoreCheck.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
+    scoreCheck.innerHTML = BAND_ICONS['band-good']; 
+    scoreSummary.textContent = 'Analyzing...';
+    scoreStats.textContent = '';
+    textarea.focus();
+  });
+
+
+  // --- File extraction setup ---
+  const EXTRACT_URL = 'http://127.0.0.1:5000/extract-text';
   const LONG_DOCUMENT_WORD_THRESHOLD = 2500;
 
   function showUploadNotice(message, isInfo){
@@ -334,83 +519,83 @@
       const response = await fetch(EXTRACT_URL, { method: 'POST', body: formData });
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Could not read this file.');
-      }
+      if (!response.ok) throw new Error(data.error || 'Could not read this file.');
 
       textarea.value = data.essay;
       textarea.scrollTop = 0;
       backdrop.scrollTop = 0;
-      textarea.dispatchEvent(new Event('input')); // updates word count + enables Analyze
+      textarea.dispatchEvent(new Event('input')); 
 
       const wordCount = countWords(data.essay);
       const messages = [];
 
       if (wordCount > LONG_DOCUMENT_WORD_THRESHOLD) {
-        messages.push(
-          `This file is ${wordCount.toLocaleString()} words. Much longer than a typical essay. ` +
-          `Scoring is calibrated on essay-length writing, so results on a full document may not be meaningful. ` +
-          `Consider trimming to the relevant section before analyzing.`
-        );
+        messages.push(`This file is ${wordCount.toLocaleString()} words. Much longer than a typical essay. Scoring is calibrated on essay-length writing, so results on a full document may not be meaningful. Consider trimming to the relevant section before analyzing.`);
       }
 
-      if (data.warnings && data.warnings.length > 0) {
-        messages.push(...data.warnings);
-      }
+      if (data.warnings && data.warnings.length > 0) messages.push(...data.warnings);
 
       if (messages.length > 0) {
         showUploadNotice(messages.join(' '), true);
       } else {
         showUploadNotice(`Loaded "${file.name}". Review the text below, then click Analyze.`, false);
       }
-
     } catch (err) {
       const isNetworkError = err instanceof TypeError;
-      showError(
-        isNetworkError
-          ? 'Could not reach the server to read this file. Make sure app.py is running.'
-          : err.message
-      );
+      showError(isNetworkError ? 'Could not reach the server to read this file. Make sure app.py is running.' : err.message);
     } finally {
-      fileInput.value = ''; // allow re-selecting the same file later
+      fileInput.value = ''; 
     }
   });
 
-  // --- Essay history (stored locally in the browser, no backend needed) ---
-  const HISTORY_KEY = 'marginal_essay_history';
-  const HISTORY_LIMIT = 10;
 
-  function loadHistory(){
+  // --- Essay History (now backed by a real SQLite database via the
+  // backend, not localStorage -- persists server-side, survives clearing
+  // the browser, and satisfies the "database" requirement of the project) ---
+  const HISTORY_URL = 'http://127.0.0.1:5000/history';
+
+  async function loadHistory(){
     try {
-      return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+      const res = await fetch(HISTORY_URL);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.history || [];
     } catch (e) {
-      return [];
+      return []; // backend not reachable -- fail quietly, history just won't show
     }
   }
 
-  function saveHistoryEntry(entry){
-    const history = loadHistory();
-    history.unshift(entry); // newest first
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, HISTORY_LIMIT)));
+  async function saveHistoryEntry(entry){
+    try {
+      await fetch(HISTORY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry),
+      });
+    } catch (e) {
+      // Non-fatal: the analysis itself already succeeded and is showing
+      // on screen, only the history save failed -- don't interrupt the
+      // user's flow over this.
+    }
     renderHistory();
   }
 
-  function deleteHistoryEntry(id){
-    const history = loadHistory().filter(e => e.id !== id);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  async function deleteHistoryEntry(id){
+    try {
+      await fetch(`${HISTORY_URL}/${id}`, { method: 'DELETE' });
+    } catch (e) {}
     renderHistory();
   }
 
   function formatTimestamp(iso){
     const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
-           '   ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' · ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   }
 
-  function renderHistory(){
-    const history = loadHistory();
+  async function renderHistory(){
+    const history = await loadHistory();
     const section = document.getElementById('history-section');
-    
+
     if (history.length === 0) {
       section.classList.remove('show');
       return;
@@ -426,10 +611,10 @@
         <span class="history-score ${scoreBand(entry.score)}">${entry.score}</span>
         <div class="history-meta">
           <p class="history-summary">${entry.summary}</p>
-          <p class="history-date">${formatTimestamp(entry.date)}   ${entry.wordCount} words</p>
+          <p class="history-date">${formatTimestamp(entry.created_at)} · ${entry.word_count} words</p>
         </div>
         <button class="history-load" title="Load this essay back into the editor">Load</button>
-        <button class="history-delete" title="Remove from history" aria-label="Remove from history"> </button>
+        <button class="history-delete" title="Remove from history" aria-label="Remove from history">&times;</button>
       `;
 
       row.querySelector('.history-load').addEventListener('click', () => {
@@ -443,146 +628,18 @@
       });
 
       row.querySelector('.history-delete').addEventListener('click', () => deleteHistoryEntry(entry.id));
-
       historyList.appendChild(row);
     });
   }
 
-  clearHistoryBtn.addEventListener('click', () => {
-    localStorage.removeItem(HISTORY_KEY);
+  clearHistoryBtn.addEventListener('click', async () => {
+    try {
+      await fetch(HISTORY_URL, { method: 'DELETE' });
+    } catch (e) {}
     renderHistory();
   });
 
-  renderHistory(); // populate on page load, in case there's saved history already
-
-  // <50 needs work, 50-69 developing, 70-84 solid, 85+ excellent.
-  function scoreBand(score){
-    if (score >= 85) return 'band-excellent';
-    if (score >= 70) return 'band-good';
-    if (score >= 50) return 'band-mid';
-    return 'band-low';
-  }
-
-  // One badge icon per band, so the icon itself agrees with the score 
-  // not just the color. A checkmark on a 29/100 was misleading.
-  const BAND_ICONS = {
-    'band-low':
-      '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>', // X
-    'band-mid':
-      '<path d="M12 5v9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="12" cy="18" r="1.4" fill="currentColor"/>', // !
-    'band-good':
-      '<path d="M4 13l4.5 5L20 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>', // check
-    'band-excellent': '<path d="M12 2.5l2.6 5.9 6.4.6-4.8 4.3 1.4 6.3L12 16.5l-5.6 3.1 1.4-6.3-4.8-4.3 6.4-.6z" fill="currentColor"/>', // star
-  };
-
-  function renderResults(data){
-    scoreNum.textContent = data.score;
-    
-    scoreCircle.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
-    scoreCheck.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
-    
-    const band = scoreBand(data.score);
-    scoreCircle.classList.add(band);
-    scoreCheck.classList.add(band);
-    scoreCheck.innerHTML = BAND_ICONS[band];
-
-    scoreSummary.textContent = data.summary;
-    scoreStats.textContent = `${data.stats.word_count} words, ${data.stats.sentence_count} sentences analyzed.`;
-    
-    annotationsEl.innerHTML = '';
-    data.feedback.forEach(item => {
-      const card = document.createElement('div');
-      card.className = 'annotation' + (item.status === 'good' ? ' good' : '');
-      card.innerHTML = `
-        <div class="annotation-head">
-          <h4>${item.category}</h4>
-          <span class="pill ${item.status === 'good' ? 'good' : 'warn'}">${item.label}</span>
-        </div>
-        <p>${item.note}</p>
-      `;
-      annotationsEl.appendChild(card);
-    });
-
-    // Run the highlighter!
-    ignoredWords.clear(); // fresh analysis -- previous session's ignores shouldn't carry over
-    applyHighlights(textarea.value, data.issues);
-  }
-
-  function showError(message){
-    apiError.textContent = message;
-    apiError.classList.add('show');
-  }
-
-  function clearError(){
-    apiError.textContent = '';
-    apiError.classList.remove('show');
-  }
-
-  analyzeBtn.addEventListener('click', async () => {
-    clearError();
-    analyzeBtn.disabled = true;
-    const originalLabel = analyzeBtn.textContent;
-    analyzeBtn.textContent = 'Analyzing...';
-    
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ essay: textarea.value, prompt: promptInput.value })
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Analysis failed. Please try again.');
-      }
-
-      renderResults(data);
-      workspace.classList.add('has-results');
-
-      saveHistoryEntry({
-        id: Date.now(),
-        date: new Date().toISOString(),
-        score: data.score,
-        summary: data.summary,
-        wordCount: data.stats.word_count,
-        essay: textarea.value,
-      });
-
-    } catch (err) {
-      const isNetworkError = err instanceof TypeError;
-      showError(
-        isNetworkError
-          ? 'Could not reach the analysis server. Make sure app.py is running (python app.py) at ' + API_URL
-          : err.message
-      );
-    } finally {
-      analyzeBtn.disabled = countWords(textarea.value) < 30;
-      analyzeBtn.textContent = originalLabel;
-    }
-  });
-
-  resetBtn.addEventListener('click', () => {
-    textarea.value = '';
-    wordCountEl.textContent = '0';
-    analyzeBtn.disabled = true;
-    workspace.classList.remove('has-results');
-    clearError();
-    clearUploadNotice();
-    
-    // Clear out UI
-    annotationsEl.innerHTML = '';
-    highlightsEl.innerHTML = '';
-    ignoredWords.clear();
-    closeFixPopup();
-
-    scoreNum.textContent = '';
-    scoreCircle.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
-    scoreCheck.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
-    scoreCheck.innerHTML = BAND_ICONS['band-good']; // neutral default until the next result comes in
-    scoreSummary.textContent = 'Analyzing...';
-    scoreStats.textContent = '';
-    textarea.focus();
-  });
+  renderHistory();
 </script>
 </body>
 </html>

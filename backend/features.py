@@ -21,6 +21,48 @@ from spellchecker import SpellChecker
 # word-frequency dictionary, so this works with no internet access.
 _spell = SpellChecker()
 
+# ---------------------------------------------------------------------
+# Reducing false positives: pyspellchecker's bundled dictionary is a
+# general-purpose English word-frequency list. It has NO knowledge of
+# proper nouns, brand names, or contractions, so words like "Instagram"
+# or "don't" get flagged as misspelled even though they're perfectly
+# correct. Two things fix most of this:
+#
+# 1. A whitelist of common words the dictionary is known to miss --
+#    loaded directly into the spellchecker so it treats them as known.
+# 2. Heuristics applied at check-time: skip words that are ALL-CAPS
+#    (likely acronyms: NASA, GPA) and skip capitalized words that
+#    aren't the first word of their sentence (likely proper nouns:
+#    a name, a brand, a place).
+#
+# Neither of these makes spelling detection perfect -- a genuinely
+# misspelled capitalized word (e.g. "Instagraam") would now slip
+# through uncaught. That's a real, known trade-off: fewer false
+# "this is wrong" flags on correct words, at the cost of occasionally
+# missing a real mistake. For an essay-feedback tool, false positives
+# are worse (they erode trust in every OTHER correct flag), so this
+# trade-off is the right one.
+# ---------------------------------------------------------------------
+_WHITELIST = {
+    # Social media / tech brands (essays about this topic are common)
+    "instagram", "tiktok", "facebook", "snapchat", "whatsapp", "youtube",
+    "twitter", "google", "netflix", "spotify", "amazon", "apple",
+    "microsoft", "iphone", "ipad", "android", "reddit", "linkedin",
+    "discord", "chatgpt", "openai", "wifi", "smartphone", "smartphones",
+    "internet", "online", "offline", "cyberbullying", "multitasking",
+    "wellbeing", "gamification", "livestream", "podcast", "hashtag",
+    "selfie", "selfies", "influencer", "influencers", "app", "apps",
+    # Common contractions -- the regex `[A-Za-z']+` keeps the apostrophe,
+    # but pyspellchecker's dictionary often doesn't include these forms.
+    "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't",
+    "hasn't", "haven't", "hadn't", "won't", "wouldn't", "can't", "couldn't",
+    "shouldn't", "mustn't", "it's", "that's", "there's", "here's",
+    "what's", "who's", "they're", "we're", "you're", "i'm", "he's",
+    "she's", "let's", "i've", "we've", "they've", "you've", "i'll",
+    "we'll", "they'll", "you'll", "i'd", "we'd", "they'd", "you'd",
+}
+_spell.word_frequency.load_words(_WHITELIST)
+
 # A tiny hand-picked list of overused/low-value words. This is a
 # placeholder heuristic for "vocabulary repetitiveness" — good enough
 # for a baseline model, worth expanding later if time allows.
@@ -61,6 +103,22 @@ def _split_words(text: str):
     return re.findall(r"[A-Za-z']+", text)
 
 
+def _words_with_sentence_position(text: str):
+    """
+    Like _split_words, but also flags whether each word is the first
+    word of its sentence -- needed for the "skip capitalized words that
+    aren't sentence-initial" false-positive heuristic below.
+    Returns a list of (word, is_sentence_start) tuples.
+    """
+    sentences = _split_sentences(text)
+    result = []
+    for sentence in sentences:
+        sentence_words = re.findall(r"[A-Za-z']+", sentence)
+        for i, w in enumerate(sentence_words):
+            result.append((w, i == 0))
+    return result
+
+
 def extract_features(text: str) -> dict:
     """
     Returns a dict of numeric features for one essay, plus specific suggestions.
@@ -81,20 +139,37 @@ def extract_features(text: str) -> dict:
     long_word_count = sum(1 for w in words if len(w) >= 7)
     long_word_ratio = (long_word_count / word_count) if word_count else 0
 
-   # Spelling: check a sample of words and get suggestions
-    sample = words[:400]
-    misspelled = _spell.unknown([w.lower() for w in sample]) if sample else set()
+   # Spelling: check a sample of words and get suggestions.
+    # Words skipped here (ALL-CAPS acronyms, capitalized mid-sentence
+    # words that look like proper nouns) are never even passed to the
+    # spellchecker -- see the false-positive-reduction note above.
+    positioned = _words_with_sentence_position(text)[:400]
+    checkable = []
+    for word, is_sentence_start in positioned:
+        if len(word) >= 2 and word.isupper():
+            continue  # likely an acronym (NASA, GPA, USA)
+        if word[0].isupper() and not is_sentence_start and word.lower() not in _WEAK_WORDS:
+            continue  # likely a proper noun (a name, brand, or place)
+        checkable.append(word.lower())
+
+    misspelled = _spell.unknown(checkable) if checkable else set()
     misspelled_count = len(misspelled)
-    misspelled_ratio = (misspelled_count / len(sample)) if sample else 0
+    misspelled_ratio = (misspelled_count / len(checkable)) if checkable else 0
     
-    # FIX: Generate specific spelling suggestions (keep all flagged words)
+    # Multiple ranked candidates instead of pyspellchecker's single
+    # ".correction()" pick -- that method just returns whichever
+    # candidate has the highest raw word frequency, which isn't always
+    # the contextually correct fix (e.g. "adress" -> "dress" outranks
+    # "address" by frequency alone, despite "address" being the obvious
+    # intended word). Offering the top few candidates, like the
+    # vocabulary suggestions already do, lets the user pick the right
+    # one instead of being stuck with the model's single best guess.
     spelling_suggestions = {}
     for word in misspelled:
-        correction = _spell.correction(word)
-        if correction and correction != word:
-            spelling_suggestions[word] = correction
-        else:
-            spelling_suggestions[word] = None  # Flagged, but no suggestion found
+        candidates = _spell.candidates(word) or set()
+        candidates.discard(word)
+        ranked = sorted(candidates, key=lambda w: -_spell.word_frequency[w])
+        spelling_suggestions[word] = ranked[:3]
 
     # NEW: Identify overused weak words for suggestions
     found_weak_words = [w.lower() for w in words if w.lower() in _WEAK_WORDS]

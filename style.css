@@ -872,15 +872,19 @@ textarea {
   text-decoration: underline wavy var(--warn);
   text-underline-offset: 3px;
   color: transparent; /* Allows textarea text to show cleanly over it */
-  pointer-events: auto; /* clickable, even though the rest of the backdrop passes clicks through */
-  cursor: pointer;
+  /* pointer-events intentionally NOT set to auto here: clicks must pass
+     through to the actual <textarea> underneath, since the click-to-fix
+     logic listens on the textarea and uses selectionStart to figure out
+     which word was clicked. If marks intercept the click themselves,
+     the textarea never receives it and nothing happens -- this was the
+     bug preventing the vocabulary (weak-word) popup from opening. */
+  cursor: text;
 }
 
 #highlights mark.weak-word {
   background-color: #fde8b3;
   color: transparent;
-  pointer-events: auto;
-  cursor: pointer;
+  cursor: text;
 }
 
 #highlights mark.ignored{
@@ -1082,3 +1086,30 @@ textarea {
   padding:4px 6px;
 }
 .fix-ignore-btn:hover{color:var(--warn);}
+/* ---------- CUSTOMIZABLE EVALUATION CRITERIA ---------- */
+.criteria-row{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:var(--space-3);
+  margin-top:var(--space-3);
+  padding-top:var(--space-3);
+  border-top:1px solid var(--rule);
+}
+.criteria-label{
+  font-size:12px;
+  font-weight:600;
+  color:var(--ink-soft);
+}
+.criteria-check{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:12.5px;
+  color:var(--ink);
+  cursor:pointer;
+}
+.criteria-check input{
+  accent-color:var(--margin-line);
+  cursor:pointer;
+}

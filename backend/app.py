@@ -22,6 +22,8 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from features import extract_features, features_to_vector
 from file_parser import extract_text_from_upload, FileParseError
 from relevance import compute_relevance
+from coherence import compute_coherence
+import db
 
 # --- PATH DEFINITIONS ---
 # Resolve relative to this file's location, not whatever folder the app happens to be launched from.
@@ -66,6 +68,7 @@ def predict_with_transformer(essay: str) -> float:
 
 app = Flask(__name__)
 CORS(app)  # allows the frontend (served from a different origin/file) to call this API
+db.init_db()  # creates history.db and the history table if they don't exist yet
 
 
 def get_model_bundle():
@@ -108,12 +111,13 @@ def build_feedback(feat: dict) -> list:
         note_text = f"Found {misspelled} possibly misspelled word(s)."
         if suggestions:
             sugg_list = []
-            for w, c in list(suggestions.items())[:4]:
-                if c: # If a valid correction was found
-                    sugg_list.append(f"Change <span class='error-word'>{w}</span> to <span class='sugg-word'>{c}</span>")
-                else: # No correction found (e.g., proper nouns like "Instagram")
+            for w, candidates in list(suggestions.items())[:4]:
+                if candidates:  # non-empty list of ranked candidates
+                    shown = " or ".join(f"<span class='sugg-word'>{c}</span>" for c in candidates[:2])
+                    sugg_list.append(f"Change <span class='error-word'>{w}</span> to {shown}")
+                else:  # no candidates found at all (e.g. a very unusual typo)
                     sugg_list.append(f"Unknown word: <span class='error-word'>{w}</span>")
-                    
+
             note_text += f"<br><br><strong>Spelling Issues:</strong><br>• " + "<br>• ".join(sugg_list)
             if len(suggestions) > 4:
                 note_text += "<br><em>...and others.</em>"
@@ -238,32 +242,91 @@ def build_relevance_feedback(essay: str, prompt: str):
         }
 
 
+def build_coherence_feedback(essay: str):
+    """
+    Returns a Coherence feedback card, or None if the essay is too short
+    for a meaningful check. Primary signal is semantic sentence-embedding
+    similarity to the essay's overall topic (tested and validated against
+    real coherent/disjointed essays -- see coherence.py's docstring for
+    the full story of what was tried before this and why). Transition
+    word usage is included as supporting, concrete evidence alongside it.
+    """
+    result = compute_coherence(essay)
+    if result is None:
+        return None
+
+    transitions_note = ""
+    if result["transitions_found"]:
+        preview = ", ".join(result["transitions_found"][:4])
+        transitions_note = f" It also uses transition words ({preview}) to guide the reader."
+
+    if result["band"] == "good":
+        return {
+            "category": "Coherence",
+            "status": "good",
+            "label": "Well-connected",
+            "note": f"This essay's ideas stay consistently connected to its overall topic.{transitions_note}",
+        }
+    else:
+        return {
+            "category": "Coherence",
+            "status": "warn",
+            "label": "Some drift",
+            "note": (
+                "Parts of this essay seem to drift from its main topic -- one or more "
+                "sentences may be less connected to the overall argument than the rest. "
+                "Consider checking whether every sentence clearly supports your main point."
+                + transitions_note
+            ),
+        }
+
+
 @app.route("/analyze", methods=["POST"])
 def analyze():
     data = request.get_json(silent=True) or {}
     essay = data.get("essay", "")
     prompt = data.get("prompt", "")  # optional -- see build_relevance_feedback
 
+    # Customizable evaluation criteria: which feedback categories the user
+    # actually wants to see. Defaults to all five if not specified, so
+    # existing behavior is unchanged for anyone not using this. The
+    # underlying SCORE is unaffected either way -- it comes from the ML
+    # model, not from which feedback cards are displayed -- this only
+    # customizes which feedback the user is shown, matching what the
+    # synopsis calls "customizable evaluation criteria."
+    ALL_CATEGORIES = ["Grammar", "Structure", "Vocabulary", "Coherence", "Relevance"]
+    enabled_categories = data.get("enabled_categories", ALL_CATEGORIES)
+
     if not essay or len(essay.strip().split()) < 30:
         return jsonify({"error": "Essay must be at least 30 words."}), 400
 
     feat = extract_features(essay)  # still used for the feedback cards either way
 
+    bundle = get_model_bundle()
+    vector = [features_to_vector(feat)]
+    vector_scaled = bundle["scaler"].transform(vector)
+    baseline_score = max(0, min(100, round(bundle["model"].predict(vector_scaled)[0])))
+
+    transformer_score = None
     if get_transformer_bundle() is not None:
-        score = predict_with_transformer(essay)
-    else:
-        bundle = get_model_bundle()
-        vector = [features_to_vector(feat)]
-        vector_scaled = bundle["scaler"].transform(vector)
-        score = max(0, min(100, round(bundle["model"].predict(vector_scaled)[0])))
+        transformer_score = predict_with_transformer(essay)
+
+    score = transformer_score if transformer_score is not None else baseline_score
 
     feedback = build_feedback(feat)
+    coherence_card = build_coherence_feedback(essay)
+    if coherence_card is not None:
+        feedback.append(coherence_card)
     relevance_card = build_relevance_feedback(essay, prompt)
     if relevance_card is not None:
         feedback.append(relevance_card)
 
+    feedback = [f for f in feedback if f["category"] in enabled_categories]
+
     return jsonify({
         "score": score,
+        "baseline_score": baseline_score,
+        "transformer_score": transformer_score,
         "summary": score_to_band(score),
         "feedback": feedback,
         "stats": {
@@ -272,9 +335,14 @@ def analyze():
         },
         # Structured per-word data for the interactive click-to-fix editor:
         # each entry carries its own real suggestion(s), not just a bare word.
+        # NOTE: "suggestions" is a LIST for both spelling and weak_words now
+        # (previously spelling used a single "suggestion" string) -- this
+        # unification is what lets the frontend use one popup code path for
+        # both, and lets spelling offer multiple candidates instead of being
+        # stuck with pyspellchecker's single frequency-biased top pick.
         "issues": {
             "spelling": [
-                {"word": w, "suggestion": s}
+                {"word": w, "suggestions": s}
                 for w, s in feat.get("spelling_suggestions", {}).items()
             ],
             "weak_words": [
@@ -283,6 +351,49 @@ def analyze():
             ],
         }
     })
+
+
+@app.route("/history", methods=["GET"])
+def get_history():
+    entries = db.list_entries(limit=10)
+    return jsonify({"history": entries})
+
+
+@app.route("/history", methods=["POST"])
+def add_history():
+    """
+    Saves a completed analysis to the database. Called by the frontend
+    right after a successful /analyze -- takes the SAME data /analyze
+    already returned, so no re-computation happens here, just storage.
+    """
+    data = request.get_json(silent=True) or {}
+    required = ["essay", "score", "summary", "word_count", "feedback"]
+    if not all(k in data for k in required):
+        return jsonify({"error": "Missing required history fields."}), 400
+
+    entry_id = db.save_entry(
+        essay=data["essay"],
+        score=data["score"],
+        baseline_score=data.get("baseline_score"),
+        transformer_score=data.get("transformer_score"),
+        summary=data["summary"],
+        word_count=data["word_count"],
+        feedback=data["feedback"],
+    )
+    return jsonify({"id": entry_id})
+
+
+@app.route("/history/<int:entry_id>", methods=["DELETE"])
+def delete_history(entry_id):
+    db.delete_entry(entry_id)
+    return jsonify({"deleted": entry_id})
+
+
+@app.route("/history", methods=["DELETE"])
+def clear_history():
+    db.clear_all()
+    return jsonify({"cleared": True})
+
 
 @app.route("/health", methods=["GET"])
 def health():
