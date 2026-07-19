@@ -1113,3 +1113,39 @@ textarea {
   accent-color:var(--margin-line);
   cursor:pointer;
 }
+
+/* ---------- LIVE LENGTH HINT (above essay textarea, not a results card) ---------- */
+.length-hint{
+  display:none;
+  font-size:12px;
+  color:var(--ink-soft);
+  margin:2px 0 var(--space-2) 0;
+  position:relative;
+  z-index:1;
+}
+.length-hint.show{display:block;}
+
+/* ---------- MODEL TOGGLE (switch between transformer/baseline score) ---------- */
+.model-toggle{
+  display:flex;
+  gap:6px;
+  margin:var(--space-3) 0 var(--space-4) 0;
+}
+.model-toggle-btn{
+  flex:1;
+  font-size:12.5px;
+  font-weight:600;
+  color:var(--ink-soft);
+  background:var(--paper);
+  border:1px solid var(--rule);
+  border-radius:100px;
+  padding:7px 10px;
+  cursor:pointer;
+  transition:background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.model-toggle-btn:hover{border-color:var(--margin-line-soft);}
+.model-toggle-btn.active{
+  background:var(--ink);
+  color:#fff;
+  border-color:var(--ink);
+}

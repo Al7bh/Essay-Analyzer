@@ -19,7 +19,7 @@ import torch
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from features import extract_features, features_to_vector
+from features import extract_features, features_to_vector, FEATURE_ORDER
 from file_parser import extract_text_from_upload, FileParseError
 from relevance import compute_relevance
 from coherence import compute_coherence
@@ -129,46 +129,17 @@ def build_feedback(feat: dict) -> list:
             "note": note_text,
         })
 
-        
-    # --- Length -- separate from Structure on purpose. word_count is BY
-    # FAR the single most influential feature in the actual scoring model
-    # (Ridge coefficient +10.07 -- roughly 4-5x larger than every other
-    # feature), yet nothing in the other feedback categories says
-    # anything about it. That's a real gap: an essay can have clean
-    # grammar, good structure, varied vocabulary, and solid coherence,
-    # and still score moderately just because it's short -- which looks
-    # like a contradiction unless length is called out explicitly.
-    # Thresholds below are from the REAL training data, not guessed:
-    # high-scoring essays (80+) had a median of 475 words; low-scoring
-    # essays (<50) had a median of just 171 words.
-    wc = feat["word_count"]
-    if wc >= 400:
-        feedback.append({
-            "category": "Length",
-            "status": "good",
-            "label": "Well-developed",
-            "note": f"At {wc} words, this essay is in the range associated with higher-scoring essays in the training data (which averaged around 475 words).",
-        })
-    elif wc >= 250:
-        feedback.append({
-            "category": "Length",
-            "status": "good",
-            "label": "Reasonable",
-            "note": f"At {wc} words, this essay is a reasonable length. Higher-scoring essays in the training data averaged closer to 475 words -- a bit more elaboration could help.",
-        })
-    else:
-        feedback.append({
-            "category": "Length",
-            "status": "warn",
-            "label": "Short",
-            "note": (
-                f"At {wc} words, this essay is notably shorter than what tends to score well: "
-                f"in the training data, essays scoring 80+ averaged around 475 words, while essays "
-                f"scoring below 50 averaged around 171 words. This matters more to the score than any "
-                f"single grammar or vocabulary issue. Consider adding another paragraph with a "
-                f"specific example or counterargument, rather than only polishing what's already here."
-            ),
-        })
+    # NOTE: Length used to be a feedback card here. It's been moved to a
+    # live hint above the essay textarea instead (frontend-only, updates
+    # as the user types, no API call needed) -- see index.html. The real
+    # thresholds that hint uses are still the ones found here: essays
+    # scoring 80+ in the training data had a median of 475 words; essays
+    # scoring below 50 had a median of just 171 words. word_count is also
+    # still the dominant feature in the baseline model's actual scoring
+    # (Ridge coefficient +10.07, ~4-5x any other feature) -- removing it
+    # as a CARD doesn't remove its real effect on the score, only changes
+    # how that effect is communicated to the user (a live hint while
+    # writing, rather than a verdict after the fact).
 
     # --- Structure -- based on ACTUAL sentence/paragraph counts, not a
     # fixed pair of strings. Previously this only had two possible notes
@@ -355,7 +326,10 @@ def analyze():
     # model, not from which feedback cards are displayed -- this only
     # customizes which feedback the user is shown, matching what the
     # synopsis calls "customizable evaluation criteria."
-    ALL_CATEGORIES = ["Grammar", "Structure", "Length", "Vocabulary", "Coherence", "Relevance"]
+    # Length is intentionally NOT one of these -- see the frontend for why:
+    # it's now a live, always-on hint above the essay box, not a toggleable
+    # feedback card, so there's nothing here to filter it against.
+    ALL_CATEGORIES = ["Grammar", "Structure", "Vocabulary", "Coherence", "Relevance"]
     enabled_categories = data.get("enabled_categories", ALL_CATEGORIES)
 
     if not essay or len(essay.strip().split()) < 30:
@@ -363,9 +337,42 @@ def analyze():
 
     feat = extract_features(essay)  # still used for the feedback cards either way
 
+    # --- Category-based feature ablation for the baseline model ---
+    # When a category is turned off, the baseline score is recomputed
+    # WITHOUT that category's underlying features contributing to it --
+    # not just hiding the feedback card while silently keeping the same
+    # score. Each disabled category's features are replaced with their
+    # TRAINING-SET MEAN (StandardScaler already stores this in
+    # `scaler.mean_`) before scaling, which is a legitimate ablation
+    # technique for a linear model: a standardized feature sitting
+    # exactly at the training mean contributes ~0 to the prediction
+    # (scaled value ~0 * coefficient ~0 contribution), effectively
+    # removing that feature's influence without needing to retrain.
+    #
+    # NOTE: this only works for the baseline because it's an
+    # interpretable linear model over explicit named features. The
+    # TRANSFORMER cannot be cleanly ablated this way -- it's a black box
+    # operating directly on essay text tokens, with no equivalent
+    # "zero out this named feature" operation available. So the
+    # transformer's score stays based on the full, unmodified essay
+    # regardless of which categories are toggled -- a real, honest
+    # limitation worth stating explicitly if asked, not a bug.
+    CATEGORY_TO_FEATURES = {
+        "Grammar": ["misspelled_count", "misspelled_ratio"],
+        "Structure": ["sentence_count", "paragraph_count", "avg_sentence_length"],
+        "Vocabulary": ["vocab_richness", "long_word_ratio", "weak_word_count", "avg_word_length"],
+    }
+
     bundle = get_model_bundle()
-    vector = [features_to_vector(feat)]
-    vector_scaled = bundle["scaler"].transform(vector)
+    vector = features_to_vector(feat)
+    means = bundle["scaler"].mean_
+    for category, feature_names in CATEGORY_TO_FEATURES.items():
+        if category not in enabled_categories:
+            for fname in feature_names:
+                idx = FEATURE_ORDER.index(fname)
+                vector[idx] = means[idx]
+
+    vector_scaled = bundle["scaler"].transform([vector])
     baseline_score = max(0, min(100, round(bundle["model"].predict(vector_scaled)[0])))
 
     transformer_score = None
@@ -389,6 +396,8 @@ def analyze():
         "baseline_score": baseline_score,
         "transformer_score": transformer_score,
         "summary": score_to_band(score),
+        "baseline_summary": score_to_band(baseline_score),
+        "transformer_summary": score_to_band(transformer_score) if transformer_score is not None else None,
         "feedback": feedback,
         "stats": {
             "word_count": feat["word_count"],

@@ -41,7 +41,6 @@
         <span class="criteria-label">Feedback categories:</span>
         <label class="criteria-check"><input type="checkbox" value="Grammar" checked> Grammar</label>
         <label class="criteria-check"><input type="checkbox" value="Structure" checked> Structure</label>
-        <label class="criteria-check"><input type="checkbox" value="Length" checked> Length</label>
         <label class="criteria-check"><input type="checkbox" value="Vocabulary" checked> Vocabulary</label>
         <label class="criteria-check"><input type="checkbox" value="Coherence" checked> Coherence</label>
         <label class="criteria-check"><input type="checkbox" value="Relevance" checked> Relevance</label>
@@ -52,6 +51,7 @@
       <div class="margin-card panel-input">
         <span class="dogear" aria-hidden="true"></span>
         <label class="field-label" for="essay-input">Your essay</label>
+        <p class="length-hint" id="length-hint"></p>
         <div class="textarea-container">
           <div class="backdrop" id="backdrop" aria-hidden="true">
             <div class="highlights" id="highlights"></div>
@@ -76,6 +76,10 @@
             <h3 id="score-summary">Analyzing </h3>
             <p id="score-stats"></p>
           </div>
+        </div>
+        <div class="model-toggle" id="model-toggle" role="tablist" aria-label="Choose which model's score to display">
+          <button class="model-toggle-btn" id="toggle-transformer" data-model="transformer" role="tab">Transformer</button>
+          <button class="model-toggle-btn" id="toggle-baseline" data-model="baseline" role="tab">Baseline</button>
         </div>
         <div class="annotations" id="annotations">
           <!-- Feedback cards are generated dynamically from the API response -->
@@ -134,6 +138,33 @@
     return trimmed.split(/\s+/).length;
   }
 
+  // Live length hint, shown above the essay box instead of as a results
+  // card. Thresholds are the SAME real numbers found by inspecting the
+  // baseline model: essays scoring 80+ in the training data averaged
+  // ~475 words; essays scoring below 50 averaged ~171 words. word_count
+  // is also the single most influential feature in that model (Ridge
+  // coefficient +10.07, ~4-5x any other feature) -- this hint exists so
+  // that's visible WHILE writing, not just as a verdict afterward.
+  const lengthHint = document.getElementById('length-hint');
+
+  function updateLengthHint(count){
+    if (count === 0) {
+      lengthHint.textContent = '';
+      lengthHint.classList.remove('show');
+      return;
+    }
+    let message;
+    if (count >= 400) {
+      message = `${count} words: a well-developed length.`;
+    } else if (count >= 250) {
+      message = `${count} words: a reasonable length. Essays around 400+ words tend to score higher.`;
+    } else {
+      message = `${count} words. Aim for at least 250-400 words for a better score.`;
+    }
+    lengthHint.textContent = message;
+    lengthHint.classList.add('show');
+  }
+
   function escapeHtml(s){
     // IMPORTANT: quotes must be escaped too, not just &/</>. This was the
     // actual bug preventing the vocabulary popup from working: suggestion
@@ -177,6 +208,7 @@
     const count = countWords(textarea.value);
     wordCountEl.textContent = count;
     analyzeBtn.disabled = count < 30;
+    updateLengthHint(count);
     highlightsEl.innerHTML = '';
     closeFixPopup();
 
@@ -408,6 +440,19 @@
   // Hook up button
   analyzeBtn.addEventListener('click', () => analyzeEssay(true));
 
+  // When a feedback category is turned on/off, re-run analysis if results
+  // are already showing. This matters because disabling a category isn't
+  // just cosmetic: the baseline score is genuinely recomputed server-side
+  // without that category's underlying features (see app.py's ablation
+  // logic), so the score itself changes, not just which cards are shown.
+  document.querySelectorAll('.criteria-check input').forEach(checkbox => {
+    checkbox.addEventListener('change', () => {
+      if (workspace.classList.contains('has-results') && countWords(textarea.value) >= 30) {
+        analyzeEssay(false);
+      }
+    });
+  });
+
   // --- Rendering UI Updates ---
   function scoreBand(score){
     if (score >= 85) return 'band-excellent';
@@ -423,23 +468,52 @@
     'band-excellent': '<path d="M12 2.5l2.6 5.9 6.4.6-4.8 4.3 1.4 6.3L12 16.5l-5.6 3.1 1.4-6.3-4.8-4.3 6.4-.6z" fill="currentColor"/>',
   };
 
-  function renderResults(data){
-    scoreNum.textContent = data.score;
-    
+  let lastAnalyzeData = null; // stored so the model toggle can switch instantly, no re-fetch needed
+  let activeModel = 'transformer'; // which score is currently shown in the circle
+
+  function renderScoreForModel(modelKey){
+    const data = lastAnalyzeData;
+    if (!data) return;
+
+    const score = modelKey === 'baseline' ? data.baseline_score : (data.transformer_score ?? data.baseline_score);
+    const summary = modelKey === 'baseline' ? data.baseline_summary : (data.transformer_summary ?? data.baseline_summary);
+
+    scoreNum.textContent = score;
+    scoreSummary.textContent = summary;
+
     scoreCircle.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
     scoreCheck.classList.remove('band-low', 'band-mid', 'band-good', 'band-excellent');
-    
-    const band = scoreBand(data.score);
+    const band = scoreBand(score);
     scoreCircle.classList.add(band);
     scoreCheck.classList.add(band);
     scoreCheck.innerHTML = BAND_ICONS[band];
 
-    scoreSummary.textContent = data.summary;
+    document.querySelectorAll('.model-toggle-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.model === modelKey);
+    });
+  }
+
+  document.getElementById('toggle-transformer').addEventListener('click', () => {
+    activeModel = 'transformer';
+    renderScoreForModel('transformer');
+  });
+  document.getElementById('toggle-baseline').addEventListener('click', () => {
+    activeModel = 'baseline';
+    renderScoreForModel('baseline');
+  });
+
+  function renderResults(data){
+    lastAnalyzeData = data;
+
+    const hasTransformer = data.transformer_score !== null && data.transformer_score !== undefined;
+    document.getElementById('toggle-transformer').style.display = hasTransformer ? '' : 'none';
+    document.getElementById('model-toggle').style.display = hasTransformer ? '' : 'none';
+    if (!hasTransformer) activeModel = 'baseline';
+
+    renderScoreForModel(activeModel);
+
     scoreStats.textContent = `${data.stats.word_count} words, ${data.stats.sentence_count} sentences analyzed.`;
-    if (data.transformer_score !== null && data.transformer_score !== undefined) {
-      scoreStats.textContent += ` · Transformer: ${data.transformer_score} · Baseline: ${data.baseline_score}`;
-    }
-    
+
     annotationsEl.innerHTML = '';
     data.feedback.forEach(item => {
       const card = document.createElement('div');
@@ -487,6 +561,9 @@
     scoreCheck.innerHTML = BAND_ICONS['band-good']; 
     scoreSummary.textContent = 'Analyzing...';
     scoreStats.textContent = '';
+    updateLengthHint(0);
+    lastAnalyzeData = null;
+    activeModel = 'transformer';
     textarea.focus();
   });
 

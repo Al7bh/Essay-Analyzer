@@ -74,7 +74,7 @@ def extract_from_pdf(file_storage) -> tuple[str, list]:
         reader = PdfReader(file_storage.stream)
     except PdfReadError:
         raise FileParseError(
-            "This PDF could not be read — it may be corrupted or not a valid PDF file."
+            "This PDF could not be read. It may be corrupted or not a valid PDF file."
         )
 
     if reader.is_encrypted:
@@ -105,7 +105,7 @@ def extract_from_pdf(file_storage) -> tuple[str, list]:
 
     if image_count > 0:
         warnings.append(
-            f"{image_count} image(s) in this PDF were skipped — only text is analyzed."
+            f"{image_count} image(s) in this PDF were skipped. Only text is analyzed."
         )
 
     text = "\n\n".join(p.strip() for p in pages_text if p.strip())
@@ -118,7 +118,7 @@ def extract_from_docx(file_storage) -> tuple[str, list]:
         document = docx.Document(file_storage.stream)
     except PackageNotFoundError:
         raise FileParseError(
-            "This .docx file could not be read — it may be corrupted, or "
+            "This .docx file could not be read. It may be corrupted, or "
             "might actually be an old .doc file (only .docx is supported)."
         )
     except Exception:
@@ -137,7 +137,7 @@ def extract_from_docx(file_storage) -> tuple[str, list]:
         image_count = 0
     if image_count > 0:
         warnings.append(
-            f"{image_count} image(s) in this document were skipped — only text is analyzed."
+            f"{image_count} image(s) in this document were skipped. Only text is analyzed."
         )
 
     # Tables aren't walked above (document.paragraphs doesn't include table
@@ -182,7 +182,7 @@ def extract_text_from_upload(file_storage) -> dict:
     if not text or len(text.strip()) == 0:
         raise FileParseError(
             "No readable text was found in this file. If it's a scanned "
-            "document (photos of pages), text extraction won't work — "
+            "document (photos of pages), text extraction won't work. "
             "try a document with real text instead."
         )
 
