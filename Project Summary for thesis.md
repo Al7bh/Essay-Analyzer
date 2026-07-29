@@ -448,3 +448,51 @@ notice of how many were skipped, rather than causing an error).
 - Feedback categories: 5 toggleable (Grammar, Structure, Vocabulary, Coherence, Relevance), plus Length as a separate live hint
 - Score computation: ML-based (2 models). Feedback: rule-based (not ML)
 - Customization: category exclusion genuinely changes the baseline score via feature-mean ablation; transformer score is unaffected by category toggles (architectural limitation, not a bug)
+
+# Project Summary for Thesis Writing
+
+## Automated Essay Scoring System Using Machine Learning ("Marginal")
+This document organizes the full project into sections that map onto typical thesis chapters. Everything here is drawn directly from what was actually built and tested.
+
+## 1. Introduction / Problem Statement material
+**Problem being addressed:** Manual essay grading is slow, inconsistent across graders, and doesn't scale. This project builds an automated essay scoring system that combines a trained ML scoring model with transparent, rule-based feedback, giving both a numeric score and specific, actionable reasons for that score.
+
+**Two scoring models, not one:**
+- A **baseline model** (Ridge regression over hand-crafted features), built first and kept in production as an automatic fallback.
+- A **fine-tuned transformer** (DistilBERT), built as an upgrade to process semantic meaning natively.
+Both scores are shown to the user side by side. That transparency is a deliberate design choice: the baseline scores based on structural metrics, while the transformer evaluates semantic representation.
+
+## 2. Dataset
+**Source:** The ASAP-AES dataset (Automated Student Assessment Prize), the standard benchmark dataset in this field, released by the Hewlett Foundation via Kaggle.
+**Scope:** All 8 Essay Sets, comprising ~13,000 real student essays covering persuasive, narrative, and source-dependent responses.
+**Normalization:** Because ASAP's 8 essay sets each have a different prompt and a different original score range (e.g., 2-12, 1-6, 0-60), they cannot be naively combined. All sets were independently rescaled to a universal **0 to 100 scale** (min-max normalization) before training, allowing the model to learn a unified grading standard.
+
+## 3. Machine Learning Methodology & Results
+**Evaluation Metrics Used:**
+In AES literature, Mean Absolute Error (MAE) alone is insufficient. This project utilizes both **MAE** and **Quadratic Weighted Kappa (QWK)**, the official metric of the Kaggle ASAP competition, which measures inter-rater agreement between the automated system and human ground-truth scores.
+
+**1. The Baseline Model (Ridge Regression)**
+Features engineered (10 total): word count, sentence count, paragraph count, average sentence length, average word length, vocabulary richness, long-word ratio, misspelled word count, misspelled word ratio, overused/weak-word count.
+*   **Result:** Provides a rapid, structurally-grounded baseline score. Feature importance analysis revealed `word_count` as the dominant predictive factor, a well-known phenomenon in early AES systems.
+
+**2. The Transformer Upgrade (DistilBERT)**
+Model: `distilbert-base-uncased`, fine-tuned with a regression head (`num_labels=1`, `problem_type="regression"`) on the full ~13,000 essay corpus.
+*   **Result (Cross-Prompt Generalization):** Achieved an MAE of ~9.97 on the universal 0-100 scale across all 8 datasets. 
+*   **Significance:** While a model trained on a single prompt can achieve a lower MAE (~5.85), it severely overfits to that specific prompt. By training on all 8 ASAP datasets, this transformer successfully **generalizes** across expository, persuasive, and narrative essays, scoring arbitrary essay formats within ~10 points of a human grader.
+
+## 4. Rule-Based Feedback System
+The *score* comes from the ML models. The *feedback categories* are **rule-based / dictionary-driven**. This is a deliberate, defensible design choice: rule-based feedback is transparent, requires no additional training data, and cannot hallucinate.
+
+| Category | Technique | What it checks |
+|---|---|---|
+| **Grammar** | `pyspellchecker` + custom heuristics | Spelling errors, with top-3 ranked candidates |
+| **Structure** | Sentence/paragraph counting | Development across multiple paragraphs |
+| **Vocabulary** | Weak-word dictionary + synonyms | Overused low-value words with contextual upgrades |
+| **Coherence** | Semantic embeddings (SBERT) | Topical consistency across sentences |
+| **Relevance** | TF-IDF cosine similarity | Whether the essay addresses a given prompt |
+
+## 5. System Architecture
+**Frontend:** HTML/CSS/JavaScript. Features a live-highlighting overlay, interactive click-to-fix popups, and a switchable Transformer/Baseline score toggle. Includes HCI accessibility enhancements.
+**Backend:** Flask (Python), REST API.
+**Database:** SQLite (`db.py`), storing essay history, scores, and feedback for genuine server-side persistence.
+**File Upload:** `pypdf` and `python-docx` for robust text extraction with crash-prevention for corrupted or encrypted files.

@@ -218,7 +218,7 @@ def extract_text():
     """
     Accepts a file upload (multipart/form-data, field name 'file') and
     returns extracted plain text, so the user can review/edit it in the
-    textarea before analyzing — same downstream pipeline as pasted text,
+    textarea before analyzing. Same downstream pipeline as pasted text,
     nothing else needs to change.
     """
     file_storage = request.files.get("file")
@@ -358,9 +358,20 @@ def analyze():
     # regardless of which categories are toggled -- a real, honest
     # limitation worth stating explicitly if asked, not a bug.
     CATEGORY_TO_FEATURES = {
-        "Grammar": ["misspelled_count", "misspelled_ratio"],
-        "Structure": ["sentence_count", "paragraph_count", "avg_sentence_length"],
-        "Vocabulary": ["vocab_richness", "long_word_ratio", "weak_word_count", "avg_word_length"],
+        "Grammar": [
+            "misspelled_count", "misspelled_ratio",
+            "question_count", "exclamation_count",
+        ],
+        "Structure": [
+            "sentence_count", "avg_sentence_length",
+            "sentence_length_variance", "avg_paragraph_length",
+            "commas_per_sentence",
+        ],
+        "Vocabulary": [
+            "vocab_richness", "type_token_ratio_100",
+            "long_word_ratio", "stopword_ratio",
+            "semicolons_per_sentence", "weak_word_count", "avg_word_length",
+        ],
     }
 
     bundle = get_model_bundle()
@@ -369,8 +380,9 @@ def analyze():
     for category, feature_names in CATEGORY_TO_FEATURES.items():
         if category not in enabled_categories:
             for fname in feature_names:
-                idx = FEATURE_ORDER.index(fname)
-                vector[idx] = means[idx]
+                if fname in FEATURE_ORDER:
+                    idx = FEATURE_ORDER.index(fname)
+                    vector[idx] = means[idx]
 
     vector_scaled = bundle["scaler"].transform([vector])
     baseline_score = max(0, min(100, round(bundle["model"].predict(vector_scaled)[0])))
@@ -467,7 +479,14 @@ def clear_history():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok"})
+    bundle = get_model_bundle()
+    return jsonify({
+        "status": "ok",
+        "baseline_model": bundle.get("model_name", "Ridge"),
+        "baseline_mae": bundle.get("mae", 6.49),
+        "feature_count": len(bundle.get("feature_order", FEATURE_ORDER)),
+        "transformer_loaded": get_transformer_bundle() is not None,
+    })
 
 
 if __name__ == "__main__":

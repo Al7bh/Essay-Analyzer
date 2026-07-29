@@ -720,6 +720,48 @@
     renderHistory();
   });
 
+  // --- HCI ENHANCEMENT 1: Keyboard Shortcut (Ctrl/Cmd + Enter to Analyze) ---
+textarea.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    if (!analyzeBtn.disabled) {
+      analyzeBtn.click();
+    }
+  }
+});
+
+// --- HCI ENHANCEMENT 2: Interactive Feedback Card linking to Highlights ---
+function enableCardInteractivity() {
+  const cards = document.querySelectorAll('.annotation');
+  cards.forEach(card => {
+    card.addEventListener('mouseenter', () => {
+      const category = card.querySelector('h4').textContent.trim();
+      let targetClass = '';
+      if (category === 'Grammar') targetClass = 'error-word';
+      if (category === 'Vocabulary') targetClass = 'weak-word';
+      
+      if (targetClass) {
+        highlightsEl.querySelectorAll(`mark.${targetClass}`).forEach(m => {
+          m.classList.add('active-card-target');
+        });
+      }
+    });
+
+    card.addEventListener('mouseleave', () => {
+      highlightsEl.querySelectorAll('mark.active-card-target').forEach(m => {
+        m.classList.remove('active-card-target');
+      });
+    });
+  });
+}
+
+// Hook into existing renderResults wrapper
+const originalRenderResults = renderResults;
+renderResults = function(data) {
+  originalRenderResults(data);
+  enableCardInteractivity();
+};
+
   renderHistory();
 </script>
 </body>

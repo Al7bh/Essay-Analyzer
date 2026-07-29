@@ -152,10 +152,13 @@ img{max-width:100%;display:block;}
 }
 .hero-graphic img{
   width:min(100%, 480px);
+  max-width:100%;
   height:auto;
   max-height:360px;
   object-fit:contain;
   display:block;
+  image-rendering:auto;
+  border-radius:var(--radius);
 }
 
 /* Decorative margin doodles — quiet by default, only shown where there's
@@ -667,6 +670,10 @@ footer p{font-size:13px;color:var(--ink-soft);}
   .btn-primary, .btn-secondary{width:100%;text-align:center;}
   .card-footer{flex-direction:column;align-items:stretch;}
   .score-row{flex-direction:column;align-items:flex-start;text-align:left;}
+  .hero{flex-direction:column;gap:var(--space-3);}
+  .hero-graphic{display:none;}
+  .criteria-row{gap:var(--space-2);}
+  .criteria-check{font-size:11px;}
 }
 
 /* Mobile (380–479px) */
@@ -675,9 +682,13 @@ footer p{font-size:13px;color:var(--ink-soft);}
     --h1-size:30px;
     --lede-size:15.5px;
   }
+  .wrap{padding:0 var(--space-3);}
   .margin-card{padding:var(--space-4) var(--space-4) var(--space-4) var(--space-5);}
   .margin-card::before{left:26px;}
   .score-row{flex-direction:column;align-items:flex-start;}
+  .hero{flex-direction:column;gap:var(--space-4);}
+  .hero-graphic{display:none;}
+  .fix-popup{min-width:180px;max-width:min(280px,85vw);}
 }
 
 /* Large mobile / small tablet (480–767px) */
@@ -688,6 +699,8 @@ footer p{font-size:13px;color:var(--ink-soft);}
   }
   .margin-card::before{left:28px;}
   .score-row{flex-wrap:nowrap;}
+  .hero-graphic{display:none;}
+  .hero{padding-bottom:var(--space-4);}
 }
 
 /* Tablet (768–1023px) */
@@ -696,6 +709,8 @@ footer p{font-size:13px;color:var(--ink-soft);}
     --h1-size:40px;
     --content-max:680px;
   }
+  .hero-graphic{display:none;}
+  .hero{padding-bottom:var(--space-4);}
 }
 
 /* Laptop and up (1024px+): essay shows full width by default.
@@ -885,14 +900,17 @@ textarea {
   line-height: 28px;
   padding: 0;
   margin: 0;
+  /* Match textarea metrics exactly for pixel-perfect overlay alignment */
+  letter-spacing: normal;
+  word-spacing: normal;
 }
 
 /* Backdrop Mark Styles */
 #highlights mark.error-word {
-  background: transparent;
+  background: rgba(181,72,47,0.12); /* Light red tint - visible on all screen sizes */
   text-decoration: underline wavy var(--warn);
   text-underline-offset: 3px;
-  color: transparent; /* Allows textarea text to show cleanly over it */
+  color: transparent;
   /* pointer-events intentionally NOT set to auto here: clicks must pass
      through to the actual <textarea> underneath, since the click-to-fix
      logic listens on the textarea and uses selectionStart to figure out
@@ -900,12 +918,14 @@ textarea {
      the textarea never receives it and nothing happens -- this was the
      bug preventing the vocabulary (weak-word) popup from opening. */
   cursor: text;
+  border-radius: 2px;
 }
 
 #highlights mark.weak-word {
-  background-color: #fde8b3;
+  background-color: rgba(253,232,179,0.6);
   color: transparent;
   cursor: text;
+  border-radius: 2px;
 }
 
 #highlights mark.ignored{

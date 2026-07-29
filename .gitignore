@@ -1,3 +1,4 @@
 backend/transformer_model/model.safetensors
-backend/_pycache__/
 backend/history.db
+.blackbox
+backend/__pycache__
