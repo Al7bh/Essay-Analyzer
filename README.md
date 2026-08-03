@@ -182,5 +182,3 @@ Be precise about this in your defense. Examiners do ask.
 
 * **The score** is Machine Learning: the baseline Scikit-learn tabular model or the fine-tuned DistilBERT deep learning architecture.
 * **The feedback** (Grammar, Structure, Vocabulary, Coherence, Relevance) is deterministic, rule-based, and dictionary-driven (Spellchecker, weak-word lists, TF-IDF cosine similarity, SBERT embeddings). **This is a deliberate design choice:** rule-based feedback is transparent, fast, and does not hallucinate.
-
-```
